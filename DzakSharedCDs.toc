@@ -1,0 +1,22 @@
+## Interface: 120005, 120007
+## Title: DzakSharedCDs
+## Notes: Broadcasts your tracked spell cooldowns to addon-using party members and shows theirs back, via a hidden chat-prefix channel.
+## Author: Dzak
+## Version: 0.3.0
+## SavedVariables: DzakSharedCDsDB
+## IconTexture: Interface\Icons\Spell_Holy_BorrowedTime
+
+Libs\LibStub\LibStub.lua
+Libs\LibEditMode\embed.xml
+Libs\LibSpecialization\LibSpecialization.lua
+
+Debug.lua
+Anchor.lua
+ClassDefaults.lua
+SpecCache.lua
+Chat.lua
+PartyFrames.lua
+Tracker.lua
+Display.lua
+Main.lua
+Settings.lua

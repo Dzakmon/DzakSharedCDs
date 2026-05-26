@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Repos/WoW/MiniCC/**)",
+      "Read(//c/Repos/WoW/DzakTools/**)",
+      "WebFetch(domain:warcraft.wiki.gg)",
+      "WebSearch",
+      "Bash(cp -r \"C:/Repos/WoW/DzakTools/Libs/LibStub\" \"C:/Repos/WoW/DzakSharedCDs/Libs/\")",
+      "Bash(cp -r \"C:/Repos/WoW/DzakTools/Libs/LibEditMode\" \"C:/Repos/WoW/DzakSharedCDs/Libs/\")",
+      "Bash(mkdir -p \"C:/Repos/WoW/DzakSharedCDs/Libs/LibStub\")",
+      "Bash(mv \"C:/Repos/WoW/DzakSharedCDs/Libs/LibStub.lua\" \"C:/Repos/WoW/DzakSharedCDs/Libs/LibStub/LibStub.lua\")",
+      "WebFetch(domain:www.wowhead.com)",
+      "WebFetch(domain:www.icy-veins.com)"
+    ]
+  }
+}
