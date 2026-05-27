@@ -145,6 +145,39 @@ local content = CreateFrame("Frame", nil, scroll)
 content:SetSize(LIST_WIDTH - 20, 1)
 scroll:SetScrollChild(content)
 
+-- ============================================================
+-- SLASH COMMANDS REFERENCE
+-- Lives in the panel so users discover commands without having
+-- to remember to type `/dscd ?`. Keep in sync with Main.lua's
+-- SlashCmdList["DSCD"] body — and with Debug.lua for /dscddebug.
+-- ============================================================
+
+local SLASH_HELP = {
+	{ "/dscd",            "open this settings panel" },
+	{ "/dscd status",     "print state summary (enabled, local spec, group, instance)" },
+	{ "/dscd init",       "print the spell list your next INIT broadcast would advertise" },
+	{ "/dscd broadcast",  "force an INIT broadcast now (bypasses debounce)" },
+	{ "/dscd ping",       "transport delivery test — recipients print a visible chat line" },
+	{ "/dscddebug",       "toggle debug tracing on/off (logs every wire send + receive)" },
+}
+
+local cmdHeader = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+cmdHeader:SetPoint("TOPLEFT", scroll, "BOTTOMLEFT", 8, -16)
+cmdHeader:SetText("Slash commands")
+
+local cmdBody = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+cmdBody:SetPoint("TOPLEFT", cmdHeader, "BOTTOMLEFT", 0, -6)
+cmdBody:SetJustifyH("LEFT")
+cmdBody:SetWidth(LIST_WIDTH)
+do
+	local lines = {}
+	for i, entry in ipairs(SLASH_HELP) do
+		-- Cyan command, light-grey hyphen, white description.
+		lines[i] = string.format("|cff66ddff%-18s|r  |cff999999—|r  %s", entry[1], entry[2])
+	end
+	cmdBody:SetText(table.concat(lines, "\n"))
+end
+
 local function FormatLine(id)
 	local info = C_Spell.GetSpellInfo(id)
 	local name = info and info.name or "(unknown)"

@@ -4,7 +4,7 @@ A small WoW retail addon that lets a 5-man dungeon group **see each other's majo
 
 How it works in one line: each client broadcasts when it casts a tracked spell over a hidden addon-message channel; receivers render that as an icon with a cooldown swipe on the sender's party frame.
 
-Status: **v0.3.0** — untested in a live group as of this commit. Code complete; awaiting in-game verification.
+Status: **v0.4.0** — untested in a live group as of this commit. Code complete; awaiting in-game verification.
 
 ---
 
@@ -30,15 +30,24 @@ No CurseForge / Wago packaging yet — this is intentionally a personal project.
 
 ### The wire protocol
 
-All inter-client communication goes through one Blizzard `CHAT_MSG_ADDON` prefix: **`DSCD`**. The channel is invisible to chat windows. Three message verbs:
+All inter-client communication goes through one Blizzard `CHAT_MSG_ADDON` prefix: **`DSCD`**. The channel is invisible to chat windows. Four message verbs:
 
 | Wire format                      | Meaning                                                                                            |
 | -------------------------------- | -------------------------------------------------------------------------------------------------- |
 | `INIT:<id1>,<id2>,...`           | "Here's the subset of tracked spells I actually have talented." Sent on ready check + other moments. |
 | `USED:<spellID>`                 | "I just cast spell `<spellID>`." Triggers a cooldown swipe on the receiver's display.              |
 | `READY:<spellID>`                | "My cooldown for `<spellID>` finished." Triggers the receiver to clear the swipe.                  |
+| `PING:<timestamp>`               | Transport-layer delivery test from `/dscd ping`. Receivers print a visible chat line.              |
+
+**Distribution**: PARTY for parties, RAID for raids — never INSTANCE_CHAT, even inside dungeons. This mirrors `LuraMemorySync` (a known-working production addon bundled alongside this one for reference); some wiki guidance says addon messages "should" use INSTANCE_CHAT in instances but real-world deployment doesn't.
 
 Throttling: Blizzard caps `SendAddonMessage` at 10-burst + 1/sec recovery per prefix. `Tracker.lua` additionally debounces INIT broadcasts (2.5s coalescing + 3s minimum interval) so a roster cascade or a flurry of talent updates can't spam the channel.
+
+**Verifying delivery**: if you suspect messages aren't getting through, run `/dscd ping` while in a group with another addon user. The recipient sees `received PING from <you>` printed to their chat. As a sanity check that the prefix is registered:
+
+```
+/dump C_ChatInfo.IsAddonMessagePrefixRegistered("DSCD")
+```
 
 ### Sender identification
 
@@ -122,6 +131,7 @@ Settings ......................... uses ns.* helpers from Main + ClassDefaults
 | `/dscd status`     | Print a one-screen state summary (enabled, local spec, specs configured, group/instance). |
 | `/dscd init`       | Print the spell list your next INIT broadcast would announce (tracked ∩ `IsPlayerSpell`). |
 | `/dscd broadcast`  | Force an immediate INIT broadcast (bypasses the debounce).                  |
+| `/dscd ping`       | Transport delivery test. Sends a ping; receivers print a visible confirmation. |
 | `/dscddebug`       | Toggle debug tracing (on/off/toggle). When on, every wire send + receive logs. |
 
 ---
@@ -169,8 +179,9 @@ Migration: v0.2.0+ dropped the old flat `trackedSpells` set from v0.1.0 uncondit
 Internally wraps `LibSpecialization.RegisterGroup`.
 
 ### `Chat.lua`
-- `ns.Chat:Send(verb, payload)` — wraps `C_ChatInfo.SendAddonMessage` with the right distribution (INSTANCE_CHAT in dungeons, PARTY/RAID outside).
-- `ns.Chat:SetReceiveHandler(fn)` — `fn(senderShortName, verb, payload)` fires on `CHAT_MSG_ADDON` with prefix `DSCD`.
+- `ns.Chat:Send(verb, payload)` — wraps `C_ChatInfo.SendAddonMessage`. Distribution is `RAID` in raids, `PARTY` otherwise. Never `INSTANCE_CHAT` (LuraMemorySync precedent).
+- `ns.Chat:SendPing()` — transport delivery test. Prints sender-side status and visible chat lines on every recipient.
+- `ns.Chat:SetReceiveHandler(fn)` — `fn(senderShortName, verb, payload)` fires on `CHAT_MSG_ADDON` with prefix `DSCD`. PING is handled internally and never reaches this handler.
 - Constant: `ns.Chat.PREFIX = "DSCD"`.
 
 ### `PartyFrames.lua`
@@ -195,7 +206,7 @@ Internally wraps `LibSpecialization.RegisterGroup`.
 - `ns.EnsureSpecSeeded(specId)` — lazy default-seeding.
 - `ns.GetTrackedForSpec(specId)` → that spec's tracked set (or nil).
 - `ns.ResetSpecToDefaults(specId)` / `ns.AddTracked(specId, spellId)` / `ns.RemoveTracked(specId, spellId)`.
-- Slash: `/dscd`, `/dscd status`, `/dscd init`, `/dscd broadcast`.
+- Slash: `/dscd`, `/dscd status`, `/dscd init`, `/dscd broadcast`, `/dscd ping`.
 
 ### `Settings.lua`
 - Blizzard Settings canvas: master Enable checkbox + spec dropdown (grouped by class) + per-spec spell list with Add / per-row Remove / Reset This Spec.
@@ -205,7 +216,7 @@ Internally wraps `LibSpecialization.RegisterGroup`.
 
 ## Known limitations / caveats
 
-1. **Remote cooldown durations are approximate.** When `USED:12345` arrives, we look up the duration via `C_Spell.GetSpellCooldown(12345)` on the *receiver's* client. Talent-based CDR (Glimmer-style reductions, etc.) on the sender's spec is not reflected. Tradeoff for not maintaining a spec-aware cooldown database.
+1. **Cooldown durations are base values, not runtime-modified.** For the local player we cache `C_Spell.GetSpellBaseCooldown(spellId)` at the moment we build the advertised set (using `GetSpellCooldown` at `UNIT_SPELLCAST_SUCCEEDED` time races the engine — it returns 0 or just the GCD). For remote players we look up the same base cooldown on the *receiver's* client. Either way, talent-based CDR (Glimmer-style reductions, etc.) is not reflected. Tradeoff for not maintaining a spec-aware cooldown database.
 
 2. **No third-party UI support yet.** Rows attach to default Blizzard frames only (`CompactPartyFrameMemberN`, `PartyFrame.MemberFrameN`). ElvUI / Grid2 / Vuhdo / Cell / NDui users fall back to the LibEditMode anchor. Adding more is straightforward — mirror the patterns in MiniCC's `Core/Frames.lua`.
 

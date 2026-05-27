@@ -174,12 +174,19 @@ SlashCmdList["DSCD"] = function(msg)
 	elseif msg == "broadcast" then
 		ns.Tracker:ScheduleInitBroadcast(0.1)
 		print("|cff00ff00DzakSharedCDs:|r INIT scheduled")
+	elseif msg == "ping" then
+		-- Delivery parity test. Sends a PING and prints whether it left
+		-- the wire; receivers print a visible chat line when it arrives.
+		-- Bypasses Tracker / spec / talent logic so a failure is purely
+		-- a transport issue.
+		ns.Chat:SendPing()
 	else
 		print("|cff00ff00DzakSharedCDs:|r commands:")
 		print("  /dscd            - open settings panel")
 		print("  /dscd status     - print state summary")
 		print("  /dscd init       - print what your next INIT would advertise")
 		print("  /dscd broadcast  - force an INIT broadcast now")
+		print("  /dscd ping       - send a delivery test (visible to recipients)")
 		print("  /dscddebug       - toggle debug tracing")
 	end
 end
