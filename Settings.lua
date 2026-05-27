@@ -1,56 +1,44 @@
--- Blizzard Settings canvas — single scrollable column:
+-- Blizzard Settings canvas:
+--   - Title / subtitle.
 --   - Master Enabled checkbox.
+--   - Slash command reference (above the spec picker so it stays
+--     glanceable — the spell list below pushes everything that comes
+--     after it off-screen for users with many tracked spells).
 --   - Spec dropdown (grouped by class). All edits below act on the
 --     currently-selected spec.
---   - Spell list for that spec: add by ID, remove via X, edit CD override,
---     Reset This Spec restores ns.DEFAULT_SPELLS_BY_SPEC[currentSpecId].
---   - Slash command reference.
+--   - Spell list for that spec with its own internal scroll: add by ID,
+--     remove via X, edit CD override, Reset This Spec restores
+--     ns.DEFAULT_SPELLS_BY_SPEC[currentSpecId].
 --
 -- Icon display options (size, spacing, grow direction, offsets) live in
--- Edit Mode now — select the DzakSharedCDs anchor frame in Edit Mode to
--- adjust them. See Anchor.lua's lem:AddFrameSettings call.
---
--- All content is parented to a master ScrollFrame so the panel scrolls
--- vertically when a spec's spell list is long or the viewport is small.
+-- Edit Mode — select the DzakSharedCDs anchor frame to adjust them.
 
 local addonName, ns = ...
 
 local UNKNOWN_ICON = 134400
 local ROW_HEIGHT = 26
 local ROW_GAP = 2
-local CONTENT_WIDTH = 540
+local LIST_WIDTH = 540
 
 -- ============================================================
--- ROOT FRAME + MASTER SCROLL
+-- ROOT FRAME
 -- ============================================================
 
 local optionsFrame = CreateFrame("Frame", "DzakSharedCDsOptionsFrame", UIParent)
 optionsFrame:Hide()
 
-local masterScroll = CreateFrame("ScrollFrame", nil, optionsFrame, "UIPanelScrollFrameTemplate")
-masterScroll:SetPoint("TOPLEFT", 16, -16)
-masterScroll:SetPoint("BOTTOMRIGHT", -32, 16) -- right inset leaves room for the scrollbar
-
-local content = CreateFrame("Frame", nil, masterScroll)
-content:SetSize(CONTENT_WIDTH, 1) -- height grown dynamically at the end of layout
-masterScroll:SetScrollChild(content)
-
--- ============================================================
--- HEADER
--- ============================================================
-
-local title = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-title:SetPoint("TOPLEFT", 0, 0)
+local title = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+title:SetPoint("TOPLEFT", 16, -16)
 title:SetText("DzakSharedCDs")
 
-local subtitle = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+local subtitle = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
-subtitle:SetWidth(CONTENT_WIDTH)
+subtitle:SetWidth(LIST_WIDTH)
 subtitle:SetJustifyH("LEFT")
 subtitle:SetText("Broadcasts your tracked spell cooldowns to party members who run this addon, and renders theirs on their party frames. Icon size / position / grow direction live in |cffffd100Edit Mode|r — select the DzakSharedCDs anchor frame.")
 subtitle:SetTextColor(0.7, 0.7, 0.7)
 
-local enableCB = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
+local enableCB = CreateFrame("CheckButton", nil, optionsFrame, "UICheckButtonTemplate")
 enableCB:SetSize(24, 24)
 enableCB:SetPoint("TOPLEFT", subtitle, "BOTTOMLEFT", 0, -10)
 enableCB.text = enableCB:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -59,21 +47,50 @@ enableCB.text:SetText("Enabled")
 enableCB:SetScript("OnClick", function(self) ns.SetEnabled(self:GetChecked()) end)
 
 -- ============================================================
+-- SLASH COMMANDS HELP — placed near the top so it stays visible.
+-- ============================================================
+
+local SLASH_HELP = {
+	{ "/dscd",            "open this settings panel" },
+	{ "/dscd status",     "print state summary (enabled, local spec, group, instance)" },
+	{ "/dscd init",       "print the spell list your next INIT broadcast would advertise" },
+	{ "/dscd broadcast",  "force an INIT broadcast now (bypasses debounce)" },
+	{ "/dscd ping",       "transport delivery test — recipients print a visible chat line" },
+	{ "/dscddebug",       "toggle debug tracing on/off (logs every wire send + receive)" },
+}
+
+local cmdHeader = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+cmdHeader:SetPoint("TOPLEFT", enableCB, "BOTTOMLEFT", 0, -16)
+cmdHeader:SetText("Slash commands")
+
+local cmdBody = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+cmdBody:SetPoint("TOPLEFT", cmdHeader, "BOTTOMLEFT", 0, -6)
+cmdBody:SetJustifyH("LEFT")
+cmdBody:SetWidth(LIST_WIDTH)
+do
+	local lines = {}
+	for i, entry in ipairs(SLASH_HELP) do
+		lines[i] = string.format("|cff66ddff%-18s|r  |cff999999—|r  %s", entry[1], entry[2])
+	end
+	cmdBody:SetText(table.concat(lines, "\n"))
+end
+
+-- ============================================================
 -- SPEC SELECTOR
 -- ============================================================
 
 local currentSpecId = nil
 
-local specLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-specLabel:SetPoint("TOPLEFT", enableCB, "BOTTOMLEFT", 0, -20)
+local specLabel = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+specLabel:SetPoint("TOPLEFT", cmdBody, "BOTTOMLEFT", 0, -18)
 specLabel:SetText("Spec")
 
-local specDesc = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+local specDesc = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 specDesc:SetPoint("TOPLEFT", specLabel, "BOTTOMLEFT", 0, -4)
 specDesc:SetText("Choose which spec's tracked-spell list to edit.")
 specDesc:SetTextColor(0.7, 0.7, 0.7)
 
-local specDropdown = CreateFrame("Frame", "DzakSharedCDsSpecDropdown", content, "UIDropDownMenuTemplate")
+local specDropdown = CreateFrame("Frame", "DzakSharedCDsSpecDropdown", optionsFrame, "UIDropDownMenuTemplate")
 specDropdown:SetPoint("TOPLEFT", specDesc, "BOTTOMLEFT", -16, -4)
 
 local RebuildList -- forward decl
@@ -90,8 +107,6 @@ local function InitSpecDropdown(self, level)
 	level = level or 1
 
 	if level == 1 then
-		-- Group entries by class. Use UIDROPDOWNMENU_MENU_VALUE on level
-		-- 2 to know which class submenu we're opening.
 		local seen = {}
 		for _, info in ipairs(ns.ALL_SPECS) do
 			if not seen[info.classToken] then
@@ -128,7 +143,7 @@ UIDropDownMenu_SetWidth(specDropdown, 220)
 -- ADD / RESET CONTROLS
 -- ============================================================
 
-local idInput = CreateFrame("EditBox", nil, content, "InputBoxTemplate")
+local idInput = CreateFrame("EditBox", nil, optionsFrame, "InputBoxTemplate")
 idInput:SetSize(120, 22)
 idInput:SetPoint("TOPLEFT", specDropdown, "BOTTOMLEFT", 20, -16)
 idInput:SetAutoFocus(false)
@@ -136,32 +151,40 @@ idInput:SetNumeric(true)
 idInput:SetMaxLetters(8)
 idInput:SetTextInsets(4, 4, 0, 0)
 
-local idLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+local idLabel = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 idLabel:SetPoint("BOTTOMLEFT", idInput, "TOPLEFT", -4, 2)
 idLabel:SetText("Spell ID")
 
-local addBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+local addBtn = CreateFrame("Button", nil, optionsFrame, "UIPanelButtonTemplate")
 addBtn:SetSize(70, 22)
 addBtn:SetPoint("LEFT", idInput, "RIGHT", 8, 0)
 addBtn:SetText("Add")
 
-local resetBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+local resetBtn = CreateFrame("Button", nil, optionsFrame, "UIPanelButtonTemplate")
 resetBtn:SetSize(140, 22)
 resetBtn:SetPoint("LEFT", addBtn, "RIGHT", 8, 0)
 resetBtn:SetText("Reset This Spec")
 
 -- ============================================================
--- SPELL LIST
--- The list itself isn't a separate ScrollFrame anymore — rows are
--- laid out directly inside `content` and the master scroll handles
--- overflow when a spec has many spells. listAnchor is an invisible
--- frame that gives us a stable TOP edge to position rows beneath
--- while letting us compute the list's total height later.
+-- SPELL LIST — its own ScrollFrame so the row count doesn't push
+-- the rest of the panel around.
 -- ============================================================
 
-local listAnchor = CreateFrame("Frame", nil, content)
-listAnchor:SetSize(CONTENT_WIDTH, 1)
-listAnchor:SetPoint("TOPLEFT", idInput, "BOTTOMLEFT", -8, -16)
+local scroll = CreateFrame("ScrollFrame", nil, optionsFrame, "UIPanelScrollFrameTemplate")
+-- Two anchors instead of SetSize: top edge follows idInput, bottom edge
+-- pins to the canvas so the scroll auto-fits whatever vertical space is
+-- left. Avoids the previous bug where a fixed 320 px height pushed the
+-- scroll (and its scrollbar) below the Blizzard settings canvas viewport.
+scroll:SetPoint("TOPLEFT", idInput, "BOTTOMLEFT", -8, -10)
+scroll:SetPoint("BOTTOMRIGHT", optionsFrame, "BOTTOMRIGHT", -32, 16)
+
+local scrollBg = scroll:CreateTexture(nil, "BACKGROUND")
+scrollBg:SetAllPoints()
+scrollBg:SetColorTexture(0, 0, 0, 0.3)
+
+local content = CreateFrame("Frame", nil, scroll)
+content:SetSize(LIST_WIDTH - 20, 1)
+scroll:SetScrollChild(content)
 
 local function FormatLine(id)
 	local info = C_Spell.GetSpellInfo(id)
@@ -171,7 +194,7 @@ end
 
 local function MakeRow(parent)
 	local row = CreateFrame("Frame", nil, parent)
-	row:SetSize(CONTENT_WIDTH, ROW_HEIGHT)
+	row:SetSize(LIST_WIDTH - 24, ROW_HEIGHT)
 
 	row.icon = row:CreateTexture(nil, "ARTWORK")
 	row.icon:SetSize(20, 20)
@@ -228,114 +251,52 @@ end
 
 local rowPool = {}
 
--- ============================================================
--- SLASH COMMANDS HELP
--- Anchored below the spell list. Position relative to listAnchor
--- + the dynamic row count so this section flows down as the list
--- grows / shrinks per spec.
--- ============================================================
-
-local cmdHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-cmdHeader:SetText("Slash commands")
-
-local cmdBody = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-cmdBody:SetPoint("TOPLEFT", cmdHeader, "BOTTOMLEFT", 0, -6)
-cmdBody:SetJustifyH("LEFT")
-cmdBody:SetWidth(CONTENT_WIDTH)
-
-local SLASH_HELP = {
-	{ "/dscd",            "open this settings panel" },
-	{ "/dscd status",     "print state summary (enabled, local spec, group, instance)" },
-	{ "/dscd init",       "print the spell list your next INIT broadcast would advertise" },
-	{ "/dscd broadcast",  "force an INIT broadcast now (bypasses debounce)" },
-	{ "/dscd ping",       "transport delivery test — recipients print a visible chat line" },
-	{ "/dscddebug",       "toggle debug tracing on/off (logs every wire send + receive)" },
-}
-do
-	local lines = {}
-	for i, entry in ipairs(SLASH_HELP) do
-		lines[i] = string.format("|cff66ddff%-18s|r  |cff999999—|r  %s", entry[1], entry[2])
-	end
-	cmdBody:SetText(table.concat(lines, "\n"))
-end
-
--- ============================================================
--- LIST RENDER
--- ============================================================
-
 RebuildList = function()
 	for _, row in ipairs(rowPool) do row:Hide() end
-	local rowCount = 0
-
-	if currentSpecId then
-		local tracked = ns.GetTrackedForSpec(currentSpecId) or {}
-		local sorted = {}
-		for id in pairs(tracked) do table.insert(sorted, id) end
-		table.sort(sorted)
-
-		for i, id in ipairs(sorted) do
-			local row = rowPool[i]
-			if not row then
-				row = MakeRow(content)
-				rowPool[i] = row
-			end
-			row:ClearAllPoints()
-			row:SetPoint("TOPLEFT", listAnchor, "TOPLEFT", 0, -(i - 1) * (ROW_HEIGHT + ROW_GAP))
-			row:Show()
-
-			local text, iconID = FormatLine(id)
-			row.icon:SetTexture(iconID)
-			row.label:SetText(text)
-			local specForCallback = currentSpecId
-			row.remove:SetScript("OnClick", function()
-				ns.RemoveTracked(specForCallback, id)
-				RebuildList()
-			end)
-
-			-- Override field: show current value (or blank). Save on focus
-			-- loss so users can tab/click away without an explicit submit.
-			row.cdInput.spellId = id
-			local override = ns.GetCooldownOverride(id)
-			row.cdInput:SetText(override and tostring(override) or "")
-			row.cdInput:SetScript("OnEditFocusLost", function(self)
-				local raw = self:GetText() or ""
-				local n = tonumber(raw)
-				ns.SetCooldownOverride(id, n)
-				local saved = ns.GetCooldownOverride(id)
-				self:SetText(saved and tostring(saved) or "")
-			end)
-		end
-		rowCount = #sorted
+	if not currentSpecId then
+		content:SetHeight(1)
+		return
 	end
 
-	-- Reflow elements below the list and recompute total content height
-	-- so the master scrollbar knows how far it can scroll.
-	local listHeight = rowCount * (ROW_HEIGHT + ROW_GAP)
-	cmdHeader:ClearAllPoints()
-	cmdHeader:SetPoint("TOPLEFT", listAnchor, "TOPLEFT", 8, -(listHeight + 20))
+	local tracked = ns.GetTrackedForSpec(currentSpecId) or {}
+	local sorted = {}
+	for id in pairs(tracked) do table.insert(sorted, id) end
+	table.sort(sorted)
 
-	-- Direct height calculation — sum of (above-list) + (list) + (below).
-	-- We can't use GetTop / GetBottom: content starts at height 1 and the
-	-- ScrollFrame clips children to the scroll child's bounds, so the
-	-- defer-by-one-frame approach left rows invisible. FontString heights
-	-- (variable due to wrapping) are queried directly; fixed-size widgets
-	-- use the same constants their SetSize uses above.
-	local aboveList =
-		24                                            -- title
-		+ 4 + (subtitle:GetStringHeight() or 36)      -- subtitle (wraps)
-		+ 10 + 24                                     -- enable checkbox
-		+ 20 + 24                                     -- spec label
-		+ 4 + 18                                      -- spec desc
-		+ 4 + 30                                      -- spec dropdown
-		+ 16 + 22                                     -- id input row
-		+ 16                                          -- gap to list
-	local belowList =
-		20                                            -- gap above cmdHeader
-		+ (cmdHeader:GetStringHeight() or 22)
-		+ 6
-		+ (cmdBody:GetStringHeight() or 100)
-		+ 16                                          -- bottom padding
-	content:SetHeight(aboveList + listHeight + belowList)
+	for i, id in ipairs(sorted) do
+		local row = rowPool[i]
+		if not row then
+			row = MakeRow(content)
+			rowPool[i] = row
+		end
+		row:ClearAllPoints()
+		row:SetPoint("TOPLEFT", 0, -(i - 1) * (ROW_HEIGHT + ROW_GAP))
+		row:Show()
+
+		local text, iconID = FormatLine(id)
+		row.icon:SetTexture(iconID)
+		row.label:SetText(text)
+		local specForCallback = currentSpecId
+		row.remove:SetScript("OnClick", function()
+			ns.RemoveTracked(specForCallback, id)
+			RebuildList()
+		end)
+
+		-- Override field: show current value (or blank). Save on focus
+		-- loss so users can tab/click away without an explicit submit.
+		row.cdInput.spellId = id
+		local override = ns.GetCooldownOverride(id)
+		row.cdInput:SetText(override and tostring(override) or "")
+		row.cdInput:SetScript("OnEditFocusLost", function(self)
+			local raw = self:GetText() or ""
+			local n = tonumber(raw)
+			ns.SetCooldownOverride(id, n)
+			local saved = ns.GetCooldownOverride(id)
+			self:SetText(saved and tostring(saved) or "")
+		end)
+	end
+
+	content:SetHeight(math.max(1, #sorted * (ROW_HEIGHT + ROW_GAP)))
 end
 
 -- ============================================================
@@ -377,9 +338,6 @@ optionsFrame:SetScript("OnShow", function()
 	UIDropDownMenu_SetSelectedValue(specDropdown, currentSpecId)
 	UIDropDownMenu_SetText(specDropdown, ns.FormatSpecLabel(currentSpecId))
 	RebuildList()
-	-- Reset scroll to top on every open so users don't land mid-list
-	-- after a previous session.
-	masterScroll:SetVerticalScroll(0)
 end)
 
 -- ============================================================

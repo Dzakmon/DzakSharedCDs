@@ -122,25 +122,30 @@ end
 local function AnchorRowToUnit(row, unit, cfg)
 	local frame = ns.PartyFrames:Resolve(unit)
 	row:ClearAllPoints()
+	-- Grow direction = which edge of the anchor frame the row's matching
+	-- edge sits against. Icons then extend INWARD across the anchor's
+	-- interior (toward the opposite edge). LEFT: row's left aligns to the
+	-- frame's left, icons grow rightward into the frame. RIGHT: mirror.
+	-- Use a negative offset to push the row outside the frame entirely.
+	local function attachRow(target, sx, sy)
+		if cfg.growDirection == "LEFT" then
+			row:SetPoint("LEFT", target, "LEFT", sx, sy)
+		else
+			row:SetPoint("RIGHT", target, "RIGHT", -sx, sy)
+		end
+	end
+
 	if frame then
 		row:SetParent(frame)
 		row:SetFrameStrata(frame:GetFrameStrata())
 		row:SetFrameLevel(frame:GetFrameLevel() + 5)
-		-- Grow direction picks both the anchor edge and which way icons
-		-- fan out. LEFT: row's right anchored to frame's left, icons
-		-- laid right-to-left. RIGHT: mirror.
-		if cfg.growDirection == "LEFT" then
-			row:SetPoint("RIGHT", frame, "LEFT", -cfg.offsetX, cfg.offsetY)
-		else
-			row:SetPoint("LEFT", frame, "RIGHT", cfg.offsetX, cfg.offsetY)
-		end
+		attachRow(frame, cfg.offsetX, cfg.offsetY)
 		row:Show()
 	else
-		-- Fallback: attach to the LibEditMode anchor. Grow direction picks
-		-- which edge of the anchor the row hangs off — same semantics as
-		-- the party-frame branch, so the Edit Mode preview lines up with
-		-- the in-game layout. Multiple fallback rows stack downward via
-		-- stackY so they don't pile on top of each other.
+		-- Fallback: attach to the LibEditMode anchor. Same semantics as
+		-- the party-frame branch so the Edit Mode preview matches in-game.
+		-- Multiple fallback rows stack downward via stackY so they don't
+		-- pile on top of each other.
 		local anchor = ns.anchorFrame
 		if not anchor then row:Hide(); return end
 		row:SetParent(anchor)
@@ -152,11 +157,7 @@ local function AnchorRowToUnit(row, unit, cfg)
 			if u == unit then idx = i - 1; break end
 		end
 		local stackY = -idx * (cfg.iconSize + cfg.iconGap)
-		if cfg.growDirection == "LEFT" then
-			row:SetPoint("RIGHT", anchor, "LEFT", -cfg.offsetX, cfg.offsetY + stackY)
-		else
-			row:SetPoint("LEFT", anchor, "RIGHT", cfg.offsetX, cfg.offsetY + stackY)
-		end
+		attachRow(anchor, cfg.offsetX, cfg.offsetY + stackY)
 		row:Show()
 	end
 end
@@ -198,11 +199,10 @@ local function RenderRow(unit)
 	row:SetHeight(cfg.iconSize)
 	local unitState = ns.Tracker:GetUnitState(unit) or {}
 
-	-- Lay out icons. For grow=RIGHT, anchor each icon's LEFT to the
-	-- row's LEFT at increasing x. For grow=LEFT, anchor each icon's
-	-- RIGHT to the row's RIGHT at increasing x (icons cascade leftward
-	-- from the row's right edge — which is sitting against the party
-	-- frame's left edge — so reading order is right-to-left).
+	-- Icons grow INWARD from the row's anchored edge. grow=LEFT: row's
+	-- left sits against the frame's left, so icon 1 hugs the left edge
+	-- and 2..N extend rightward into the frame. grow=RIGHT: icon 1 hugs
+	-- the right edge, 2..N extend leftward.
 	local x = 0
 	for _, spellId in ipairs(tracked) do
 		local icon = entry.icons[spellId]
@@ -214,9 +214,9 @@ local function RenderRow(unit)
 		icon:SetSize(cfg.iconSize, cfg.iconSize)
 		icon:ClearAllPoints()
 		if cfg.growDirection == "LEFT" then
-			icon:SetPoint("RIGHT", row, "RIGHT", -x, 0)
-		else
 			icon:SetPoint("LEFT", row, "LEFT", x, 0)
+		else
+			icon:SetPoint("RIGHT", row, "RIGHT", -x, 0)
 		end
 
 		local info = C_Spell.GetSpellInfo(spellId)
