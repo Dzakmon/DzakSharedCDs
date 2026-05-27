@@ -136,21 +136,27 @@ local function AnchorRowToUnit(row, unit, cfg)
 		end
 		row:Show()
 	else
-		-- Fallback: stack rows under the LibEditMode anchor.
+		-- Fallback: attach to the LibEditMode anchor. Grow direction picks
+		-- which edge of the anchor the row hangs off — same semantics as
+		-- the party-frame branch, so the Edit Mode preview lines up with
+		-- the in-game layout. Multiple fallback rows stack downward via
+		-- stackY so they don't pile on top of each other.
 		local anchor = ns.anchorFrame
 		if not anchor then row:Hide(); return end
 		row:SetParent(anchor)
 		row:SetFrameStrata("MEDIUM")
 		row:SetFrameLevel(10)
-		-- Stagger by unit index so multiple fallback rows don't pile up.
-		-- Includes raidN positions so raid mode under the fallback anchor
-		-- isn't all stacked on top of each other.
 		local idx = 0
 		local groupUnits = ns.Tracker:GetGroupUnits()
 		for i, u in ipairs(groupUnits) do
 			if u == unit then idx = i - 1; break end
 		end
-		row:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, -idx * (cfg.iconSize + cfg.iconGap))
+		local stackY = -idx * (cfg.iconSize + cfg.iconGap)
+		if cfg.growDirection == "LEFT" then
+			row:SetPoint("RIGHT", anchor, "LEFT", -cfg.offsetX, cfg.offsetY + stackY)
+		else
+			row:SetPoint("LEFT", anchor, "RIGHT", cfg.offsetX, cfg.offsetY + stackY)
+		end
 		row:Show()
 	end
 end
