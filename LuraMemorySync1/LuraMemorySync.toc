@@ -1,0 +1,15 @@
+## Interface: 120005
+## Title: Lura Memory Sync
+## Title-frFR: Lura Memory Sync
+## Notes: Symbol memory tracker for the L'ura boss — real-time raid synchronization
+## Notes-frFR: Suivi du jeu de mémoire de symboles du boss L'ura — synchronisation raid en temps réel
+## Author: Spectrøm
+## Version: 1.0.0
+## Category: Action Bars
+## X-Curse-Project-ID: 1551703
+## X-License: GPL-3.0
+## Dependencies: Blizzard_SharedXML
+## SavedVariables: LuraMemorySyncDB
+## IconTexture: Interface\AddOns\LuraMemorySync\Textures\logo-ura-memory-sync
+
+LuraMemorySync.lua

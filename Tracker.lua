@@ -41,6 +41,11 @@ local unitGuid = {}
 -- spellId -> outstanding C_Timer ticket; cancelled if we cast again
 -- before the previous READY fires (avoids stale "ready" broadcasts).
 local pendingReadyTimers = {}
+-- spellId -> base cooldown in seconds. Primed from GetSpellBaseCooldown
+-- whenever the local advertised set is built, so OnLocalCast can read a
+-- known duration without racing UNIT_SPELLCAST_SUCCEEDED against the
+-- engine committing the cooldown. Wiped on talent / spec change.
+local baseCooldownByspell = {}
 
 local pendingInitTimer = nil
 local lastInitSent = 0
@@ -125,6 +130,28 @@ local function ResolveSenderUnit(sender)
 	return nil
 end
 
+-- C_Spell.GetSpellBaseCooldown returns the spell's base cooldown in
+-- milliseconds even when the spell isn't currently on cooldown.
+-- C_Spell.GetSpellCooldown can't be used here because at
+-- UNIT_SPELLCAST_SUCCEEDED time the engine often hasn't committed the
+-- post-cast CD yet — it returns either 0 or just the GCD, so we'd never
+-- record a real CD. Falls through to the old global on clients that
+-- still expose it.
+local QueryBaseCooldownMs = (C_Spell and C_Spell.GetSpellBaseCooldown) or _G.GetSpellBaseCooldown
+
+local function GetCachedBaseCooldown(spellId)
+	local cached = baseCooldownByspell[spellId]
+	if cached then return cached end
+	if not QueryBaseCooldownMs then return nil end
+	local ms = QueryBaseCooldownMs(spellId)
+	if ms and ms >= 2000 then
+		local secs = ms / 1000
+		baseCooldownByspell[spellId] = secs
+		return secs
+	end
+	return nil
+end
+
 -- ============================================================
 -- INIT FLOW: announce what we have, consume others' announcements
 -- ============================================================
@@ -140,6 +167,9 @@ function Tracker:BuildLocalAdvertisedSet()
 		-- removes the base Avenging Wrath from IsPlayerSpell).
 		if IsPlayerSpell(spellId) then
 			set[spellId] = true
+			-- Prime the CD cache while we already know this is a real spell
+			-- the player has. Avoids the first cast missing its swipe.
+			GetCachedBaseCooldown(spellId)
 		end
 	end
 	return set
@@ -200,14 +230,6 @@ end
 -- LOCAL FLOW: player cast a tracked spell
 -- ============================================================
 
-local function GetSpellCooldownDuration(spellId)
-	local cd = C_Spell.GetSpellCooldown(spellId)
-	if not cd then return nil end
-	-- GCD shows up as a ~1.5s cooldown; ignore anything that short.
-	if not cd.duration or cd.duration < 2 then return nil end
-	return cd.duration
-end
-
 local function ScheduleReadyBroadcast(spellId, duration)
 	local prev = pendingReadyTimers[spellId]
 	if prev and prev.Cancel then prev:Cancel() end
@@ -226,7 +248,7 @@ function Tracker:OnLocalCast(spellId)
 	local tracked = GetTrackedSetForLocalSpec()
 	if not tracked or not tracked[spellId] then return end
 
-	local duration = GetSpellCooldownDuration(spellId)
+	local duration = GetCachedBaseCooldown(spellId)
 	if not duration then return end
 
 	RecordUsed("player", spellId, duration)
@@ -273,8 +295,10 @@ function Tracker:OnRemoteMessage(sender, verb, payload)
 	end
 
 	if verb == "USED" then
-		local cd = C_Spell.GetSpellCooldown(spellId)
-		local duration = (cd and cd.duration and cd.duration > 1) and cd.duration or 60
+		-- Base CD from the spell database — same on every client. 60s
+		-- fallback only triggers for spells with no static CD (rare for
+		-- the major-CD scope this addon tracks).
+		local duration = GetCachedBaseCooldown(spellId) or 60
 		RecordUsed(unit, spellId, duration)
 	elseif verb == "READY" then
 		RecordReady(unit, spellId)
@@ -322,6 +346,7 @@ function Tracker:Reset()
 		if t and t.Cancel then t:Cancel() end
 	end
 	pendingReadyTimers = {}
+	wipe(baseCooldownByspell)
 	if pendingInitTimer then pendingInitTimer:Cancel(); pendingInitTimer = nil end
 	lastInitSent = 0
 end
@@ -357,6 +382,9 @@ function Tracker:Init()
 		elseif event == "TRAIT_CONFIG_UPDATED" or event == "ACTIVE_COMBAT_CONFIG_CHANGED" then
 			-- Talent change: our advertised set may have shifted, so
 			-- re-broadcast (debounced — these events can fire in bursts).
+			-- Wipe the CD cache too; talents rarely move base CDs but a
+			-- rebuild on next BuildLocalAdvertisedSet is cheap insurance.
+			wipe(baseCooldownByspell)
 			self:ScheduleInitBroadcast()
 		end
 	end)

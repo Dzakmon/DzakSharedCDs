@@ -1,20 +1,19 @@
--- Transport layer: hidden addon-channel send + receive.
+-- Transport layer: party/instance chat send + receive.
 --
--- Wire format on prefix "DSCD":
---   "USED:<spellID>"            - sender just cast the spell
---   "READY:<spellID>"           - sender's cooldown finished
---   "INIT:<id1>,<id2>,..."      - sender announces which tracked spells
---                                 they actually have talented; receivers
---                                 use this to filter what's drawn for
---                                 the sender's row.
+-- Proof-of-concept transport using visible /p (or /raid / /instance) chat
+-- instead of the hidden addon-message channel. Each wire message is
+-- tagged "[DSCD]VERB:payload" so receivers can filter their own from
+-- normal chatter. Visible-by-design while we confirm delivery actually
+-- happens; once verified, we'll move back to C_ChatInfo.SendAddonMessage.
 --
--- Messages are silent (CHAT_MSG_ADDON, not visible in chat windows).
--- Throttled to 10 burst + 1/sec per prefix by Blizzard; Tracker
--- additionally debounces INIT broadcasts to be polite.
+-- Wire format on tag "[DSCD]":
+--   "[DSCD]USED:<spellID>"          - sender just cast the spell
+--   "[DSCD]READY:<spellID>"         - sender's cooldown finished
+--   "[DSCD]INIT:<id1>,<id2>,..."    - sender announces tracked spells
 
 local addonName, ns = ...
 
-local PREFIX = "DSCD"
+local TAG = "[DSCD]"
 
 local Chat = {}
 ns.Chat = Chat
@@ -26,10 +25,10 @@ function Chat:SetReceiveHandler(fn)
 	receiveHandler = fn
 end
 
--- Choose the right group distribution. INSTANCE_CHAT is required inside
--- instanced PvE/PvP so the message reaches the dungeon group rather than
--- being silently dropped.
-local function GetDistribution()
+-- Mirrors the original addon-channel distribution rule: inside any
+-- instanced PvE/PvP you must use INSTANCE_CHAT (the auto-merged /i),
+-- otherwise PARTY / RAID is silently dropped.
+local function GetChatType()
 	local inInstance, instanceType = IsInInstance()
 	if inInstance and (instanceType == "party" or instanceType == "raid" or instanceType == "pvp" or instanceType == "arena") then
 		return "INSTANCE_CHAT"
@@ -40,14 +39,13 @@ local function GetDistribution()
 end
 
 function Chat:Send(verb, payload)
-	local dist = GetDistribution()
-	if not dist then return end
-	local msg = verb .. ":" .. tostring(payload)
-	local ok = C_ChatInfo.SendAddonMessage(PREFIX, msg, dist)
+	local chatType = GetChatType()
+	if not chatType then return end
+	local msg = TAG .. verb .. ":" .. tostring(payload)
+	SendChatMessage(msg, chatType)
 	if ns.Debug then
-		-- Truncate INIT payloads for log readability; the full CSV can be long.
 		local logMsg = #msg > 80 and (msg:sub(1, 80) .. "...") or msg
-		ns.Debug:print("chat-send", dist, logMsg, ok and "" or "FAILED")
+		ns.Debug:print("chat-send", chatType, logMsg)
 	end
 end
 
@@ -58,30 +56,33 @@ local function NormalizeSender(sender)
 	return Ambiguate(sender, "none")
 end
 
+local function ParseTagged(text)
+	if not text or text:sub(1, #TAG) ~= TAG then return nil, nil end
+	local body = text:sub(#TAG + 1)
+	return body:match("^(%u+):(.+)$")
+end
+
 local frame = CreateFrame("Frame")
-frame:RegisterEvent("CHAT_MSG_ADDON")
-frame:SetScript("OnEvent", function(_, _, prefix, text, channel, sender)
-	if prefix ~= PREFIX then return end
+frame:RegisterEvent("CHAT_MSG_PARTY")
+frame:RegisterEvent("CHAT_MSG_PARTY_LEADER")
+frame:RegisterEvent("CHAT_MSG_RAID")
+frame:RegisterEvent("CHAT_MSG_RAID_LEADER")
+frame:RegisterEvent("CHAT_MSG_INSTANCE_CHAT")
+frame:RegisterEvent("CHAT_MSG_INSTANCE_CHAT_LEADER")
+frame:SetScript("OnEvent", function(_, event, text, sender)
 	if not receiveHandler then return end
 
-	-- "VERB:PAYLOAD" — payload is a single spellID for USED/READY, a CSV
-	-- of spellIDs for INIT. Verb is uppercase ASCII.
-	local verb, payload = text:match("^(%u+):(.+)$")
-	if not verb or not payload then
-		if ns.Debug then ns.Debug:print("chat-recv", "malformed", text, "from", sender) end
-		return
-	end
+	local verb, payload = ParseTagged(text)
+	if not verb or not payload then return end
 
 	local normalized = NormalizeSender(sender)
 	if ns.Debug then
 		local logPayload = #payload > 80 and (payload:sub(1, 80) .. "...") or payload
-		ns.Debug:print("chat-recv", channel, normalized, verb, logPayload)
+		ns.Debug:print("chat-recv", event, normalized, verb, logPayload)
 	end
 	receiveHandler(normalized, verb, payload)
 end)
 
--- Prefix registration is the gate for receiving CHAT_MSG_ADDON; without
--- this our handler never fires even if other clients send to "DSCD".
-C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
-
-Chat.PREFIX = PREFIX
+-- Kept for compatibility with any code that referenced the old addon-
+-- channel prefix; not used by the chat transport.
+Chat.PREFIX = TAG

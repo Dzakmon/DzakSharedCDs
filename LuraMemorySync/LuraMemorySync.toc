@@ -1,0 +1,16 @@
+## Interface: 120005
+## Title: L'ura Memory Sync
+## Notes: Sync Death's Dirge rune order with your raid via addon messages and macros.
+## Author: Tsuuki07
+## Version: 0.5.8
+## SavedVariables: LuraMemorySyncDB
+
+Symbols.lua
+OrderLogic.lua
+ClockLayout.lua
+Comm.lua
+Display.lua
+RaidWarning.lua
+Marked.lua
+Macros.lua
+Core.lua

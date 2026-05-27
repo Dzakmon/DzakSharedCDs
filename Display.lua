@@ -138,13 +138,17 @@ local function ApplyCooldownVisual(iconFrame, cdEntry)
 		local now = GetTime()
 		local remaining = cdEntry.readyAt - now
 		if remaining > 0 then
-			iconFrame.icon:SetDesaturated(true)
 			iconFrame.cooldown:SetCooldown(cdEntry.startTime, cdEntry.duration)
+			iconFrame.cooldown:SetDrawSwipe(true)
+			iconFrame.icon:SetDesaturated(true)
 			return
 		end
 	end
-	iconFrame.icon:SetDesaturated(false)
+	-- Clear alone leaves the swipe overlay drawn; SetDrawSwipe(false) is
+	-- required to actually erase it (matches MiniCC's clear path).
 	iconFrame.cooldown:Clear()
+	iconFrame.cooldown:SetDrawSwipe(false)
+	iconFrame.icon:SetDesaturated(false)
 end
 
 local function RenderRow(unit)
