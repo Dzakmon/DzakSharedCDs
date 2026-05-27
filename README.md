@@ -22,7 +22,30 @@ The flip side: it only works for **other party members who also run DzakSharedCD
 2. `/reload` in-game.
 3. The addon seeds its tracked-spell list from `ClassDefaults.lua` for your current spec on first run. Open `/dscd` to edit it (per spec).
 
-No CurseForge / Wago packaging yet — this is intentionally a personal project.
+---
+
+## Building a release zip (for CurseForge / sharing with testers)
+
+CurseForge rejects zips whose files sit at the top level — everything must live inside a single root folder named after the addon. Run the bundled build script to produce a correctly-shaped zip:
+
+```powershell
+pwsh ./build.ps1
+```
+
+Output: `dist/DzakSharedCDs-<version>.zip`. The script:
+
+- Reads the version from `DzakSharedCDs.toc`
+- Stages only the addon files (`*.lua`, `*.toc`, `README.md`, `Libs/`) into `dist/staging/DzakSharedCDs/`
+- Skips reference projects (`MiniCC/`, `LuraMemorySync*/`, `TerribleLuraHelper/`), `.claude/`, `.git/`
+- Zips the staging folder so `DzakSharedCDs/` is the top entry
+
+To verify before uploading:
+
+```powershell
+Expand-Archive -Path dist/DzakSharedCDs-<version>.zip -DestinationPath dist/_verify -Force
+ls dist/_verify
+# should print: DzakSharedCDs
+```
 
 ---
 
