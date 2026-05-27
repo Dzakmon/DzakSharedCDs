@@ -8,6 +8,16 @@ local addonName, ns = ...
 -- explicitly clearing all spells for a spec will NOT re-seed.
 -- ============================================================
 
+-- Defaults for the global display block. Single source of truth: both
+-- the seeder below and Settings.lua's "Reset to defaults" path read it.
+ns.DEFAULT_DISPLAY = {
+	iconSize     = 24,
+	iconGap      = 2,
+	growDirection = "RIGHT", -- "LEFT" or "RIGHT"
+	offsetX      = 6,
+	offsetY      = 0,
+}
+
 local function SeedSchema()
 	DzakSharedCDsDB = DzakSharedCDsDB or {}
 	if DzakSharedCDsDB.enabled == nil then DzakSharedCDsDB.enabled = true end
@@ -18,6 +28,23 @@ local function SeedSchema()
 	DzakSharedCDsDB.trackedSpells = nil
 
 	DzakSharedCDsDB.trackedSpellsBySpec = DzakSharedCDsDB.trackedSpellsBySpec or {}
+
+	-- v0.5.0: per-key backfill so new defaults land in existing saves
+	-- without clobbering user-tuned values. Using `if nil then` (not
+	-- `or`) so an intentional zero or false isn't overwritten.
+	DzakSharedCDsDB.display = DzakSharedCDsDB.display or {}
+	for k, v in pairs(ns.DEFAULT_DISPLAY) do
+		if DzakSharedCDsDB.display[k] == nil then
+			DzakSharedCDsDB.display[k] = v
+		end
+	end
+
+	-- v0.6.0: manual cooldown overrides. Keyed by spellId (global, not
+	-- per-spec) because the same spell's "true" cooldown is almost
+	-- always the same across specs; talent-CDR is the exception that
+	-- the override is meant to handle in the first place. Value is the
+	-- duration in seconds; absence of an entry = use API lookup.
+	DzakSharedCDsDB.cooldownOverrides = DzakSharedCDsDB.cooldownOverrides or {}
 end
 SeedSchema()
 
@@ -79,6 +106,51 @@ function ns.RemoveTracked(specId, spellId)
 	t[spellId] = nil
 	ns.Debug:print("settings", "removed", spellId, "from spec", specId)
 	if ns.Display then ns.Display:UpdateAll() end
+end
+
+-- Display settings: thin getters/setters with a re-render on write.
+-- All callers read live values from the DB, so a slider's OnValueChanged
+-- handler just calls SetDisplaySetting and trusts UpdateAll to repaint.
+function ns.GetDisplaySetting(key)
+	local v = DzakSharedCDsDB.display and DzakSharedCDsDB.display[key]
+	if v == nil then return ns.DEFAULT_DISPLAY[key] end
+	return v
+end
+
+function ns.SetDisplaySetting(key, value)
+	DzakSharedCDsDB.display = DzakSharedCDsDB.display or {}
+	DzakSharedCDsDB.display[key] = value
+	if ns.Display then ns.Display:UpdateAll() end
+end
+
+function ns.ResetDisplayDefaults()
+	DzakSharedCDsDB.display = {}
+	for k, v in pairs(ns.DEFAULT_DISPLAY) do
+		DzakSharedCDsDB.display[k] = v
+	end
+	if ns.Display then ns.Display:UpdateAll() end
+end
+
+-- Manual cooldown overrides. Returning nil means "use API lookup".
+-- Tracker consults this first on both the local-cast path and the
+-- remote USED handler, so a fix shows up identically on every client
+-- that has the same override configured.
+function ns.GetCooldownOverride(spellId)
+	if not spellId then return nil end
+	return DzakSharedCDsDB.cooldownOverrides[spellId]
+end
+
+function ns.SetCooldownOverride(spellId, seconds)
+	if not spellId then return end
+	-- Treat 0 / nil / negative as "clear the override" so the UI's
+	-- "blank field" path lands here too.
+	if not seconds or seconds <= 0 then
+		DzakSharedCDsDB.cooldownOverrides[spellId] = nil
+		ns.Debug:print("settings", "cleared CD override for", spellId)
+	else
+		DzakSharedCDsDB.cooldownOverrides[spellId] = seconds
+		ns.Debug:print("settings", "set CD override", spellId, "=", seconds)
+	end
 end
 
 -- ============================================================

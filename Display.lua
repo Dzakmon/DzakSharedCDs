@@ -1,17 +1,17 @@
 -- Per-unit horizontal icon row. One icon per tracked spell, ordered by
 -- spellID. Bright = ready, desaturated + cooldown swipe = on cooldown.
 --
--- Rows attach to the unit's Blizzard party frame when one is visible,
--- else to ns.anchorFrame. A 1-second tick re-resolves the party frame
--- so that toggling between solo/party/raid layouts doesn't strand rows
--- on a hidden anchor target.
+-- Rows attach to the unit's Blizzard party / raid frame when one is
+-- visible, else to ns.anchorFrame. A 1-second tick re-resolves the
+-- frame so toggling between solo/party/raid layouts doesn't strand
+-- rows on a hidden anchor target.
+--
+-- Layout knobs (iconSize / iconGap / growDirection / offsetX / offsetY)
+-- live in DzakSharedCDsDB.display and are read fresh on every render —
+-- no per-icon mutation when settings change, just call Display:UpdateAll
+-- and everything re-lays-out with the new values.
 
 local addonName, ns = ...
-
-local ICON_SIZE = 24
-local ICON_GAP = 2
-local ROW_OFFSET_X = 6 -- gap between party frame's right edge and the row
-local ROW_OFFSET_Y = 0
 
 local UNKNOWN_ICON = 134400
 
@@ -20,6 +20,18 @@ ns.Display = Display
 
 -- unit -> { row = Frame, icons = { [spellId] = iconFrame } }
 local rows = {}
+
+-- Read the current display config from SavedVariables. Hot-path
+-- function — called once per Render*; cheap.
+local function GetCfg()
+	return {
+		iconSize      = ns.GetDisplaySetting("iconSize"),
+		iconGap       = ns.GetDisplaySetting("iconGap"),
+		growDirection = ns.GetDisplaySetting("growDirection"),
+		offsetX       = ns.GetDisplaySetting("offsetX"),
+		offsetY       = ns.GetDisplaySetting("offsetY"),
+	}
+end
 
 local function GetTrackedSortedForUnit(unit)
 	-- Two pieces of information are needed before we can render a unit's
@@ -51,7 +63,8 @@ end
 
 local function CreateIcon(parent)
 	local f = CreateFrame("Frame", nil, parent)
-	f:SetSize(ICON_SIZE, ICON_SIZE)
+	-- Size set by RenderRow; we only need a placeholder here.
+	f:SetSize(1, 1)
 
 	f.icon = f:CreateTexture(nil, "BACKGROUND", nil, 1)
 	f.icon:SetAllPoints()
@@ -81,7 +94,7 @@ end
 
 local function CreateRow(unit)
 	local r = CreateFrame("Frame", nil, UIParent)
-	r:SetSize(1, ICON_SIZE) -- width grown dynamically
+	r:SetSize(1, 1) -- size grown dynamically in RenderRow
 	r:SetFrameStrata("MEDIUM")
 	r.unit = unit
 	r.icons = {}
@@ -106,14 +119,21 @@ local function ReleaseRow(unit)
 	rows[unit] = nil
 end
 
-local function AnchorRowToUnit(row, unit)
+local function AnchorRowToUnit(row, unit, cfg)
 	local frame = ns.PartyFrames:Resolve(unit)
 	row:ClearAllPoints()
 	if frame then
 		row:SetParent(frame)
 		row:SetFrameStrata(frame:GetFrameStrata())
 		row:SetFrameLevel(frame:GetFrameLevel() + 5)
-		row:SetPoint("LEFT", frame, "RIGHT", ROW_OFFSET_X, ROW_OFFSET_Y)
+		-- Grow direction picks both the anchor edge and which way icons
+		-- fan out. LEFT: row's right anchored to frame's left, icons
+		-- laid right-to-left. RIGHT: mirror.
+		if cfg.growDirection == "LEFT" then
+			row:SetPoint("RIGHT", frame, "LEFT", -cfg.offsetX, cfg.offsetY)
+		else
+			row:SetPoint("LEFT", frame, "RIGHT", cfg.offsetX, cfg.offsetY)
+		end
 		row:Show()
 	else
 		-- Fallback: stack rows under the LibEditMode anchor.
@@ -123,12 +143,14 @@ local function AnchorRowToUnit(row, unit)
 		row:SetFrameStrata("MEDIUM")
 		row:SetFrameLevel(10)
 		-- Stagger by unit index so multiple fallback rows don't pile up.
+		-- Includes raidN positions so raid mode under the fallback anchor
+		-- isn't all stacked on top of each other.
 		local idx = 0
-		for i = 1, (MAX_PARTY_MEMBERS or 4) + 1 do
-			local u = (i == 1) and "player" or ("party" .. (i - 1))
+		local groupUnits = ns.Tracker:GetGroupUnits()
+		for i, u in ipairs(groupUnits) do
 			if u == unit then idx = i - 1; break end
 		end
-		row:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, -idx * (ICON_SIZE + ICON_GAP))
+		row:SetPoint("TOPLEFT", anchor, "TOPLEFT", 0, -idx * (cfg.iconSize + cfg.iconGap))
 		row:Show()
 	end
 end
@@ -165,20 +187,31 @@ local function RenderRow(unit)
 		return
 	end
 
-	AnchorRowToUnit(row, unit)
+	local cfg = GetCfg()
+	AnchorRowToUnit(row, unit, cfg)
+	row:SetHeight(cfg.iconSize)
 	local unitState = ns.Tracker:GetUnitState(unit) or {}
 
-	-- Lay out icons left-to-right, creating on demand.
+	-- Lay out icons. For grow=RIGHT, anchor each icon's LEFT to the
+	-- row's LEFT at increasing x. For grow=LEFT, anchor each icon's
+	-- RIGHT to the row's RIGHT at increasing x (icons cascade leftward
+	-- from the row's right edge — which is sitting against the party
+	-- frame's left edge — so reading order is right-to-left).
 	local x = 0
-	for i, spellId in ipairs(tracked) do
+	for _, spellId in ipairs(tracked) do
 		local icon = entry.icons[spellId]
 		if not icon then
 			icon = CreateIcon(row)
 			entry.icons[spellId] = icon
 		end
 		icon.spellId = spellId
+		icon:SetSize(cfg.iconSize, cfg.iconSize)
 		icon:ClearAllPoints()
-		icon:SetPoint("LEFT", row, "LEFT", x, 0)
+		if cfg.growDirection == "LEFT" then
+			icon:SetPoint("RIGHT", row, "RIGHT", -x, 0)
+		else
+			icon:SetPoint("LEFT", row, "LEFT", x, 0)
+		end
 
 		local info = C_Spell.GetSpellInfo(spellId)
 		local tex = (info and (info.originalIconID or info.iconID)) or UNKNOWN_ICON
@@ -187,7 +220,7 @@ local function RenderRow(unit)
 		ApplyCooldownVisual(icon, unitState[spellId])
 		icon:Show()
 
-		x = x + ICON_SIZE + ICON_GAP
+		x = x + cfg.iconSize + cfg.iconGap
 	end
 
 	-- Hide any leftover icons for spells that are no longer tracked.
@@ -202,7 +235,7 @@ local function RenderRow(unit)
 		end
 	end
 
-	row:SetWidth(math.max(1, x - ICON_GAP))
+	row:SetWidth(math.max(1, x - cfg.iconGap))
 end
 
 function Display:UpdateUnit(unit)
@@ -235,9 +268,10 @@ end
 function Display:StartTicker()
 	C_Timer.NewTicker(1.0, function()
 		if not ns.IsEnabled() then return end
+		local cfg = GetCfg()
 		for _, unit in ipairs(ns.Tracker:GetGroupUnits()) do
 			local entry = rows[unit]
-			if entry then AnchorRowToUnit(entry.row, unit) end
+			if entry then AnchorRowToUnit(entry.row, unit, cfg) end
 		end
 	end)
 end

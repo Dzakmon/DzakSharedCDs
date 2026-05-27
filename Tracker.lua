@@ -25,6 +25,7 @@ local Tracker = {}
 ns.Tracker = Tracker
 
 local MAX_PARTY = MAX_PARTY_MEMBERS or 4
+local MAX_RAID  = MAX_RAID_MEMBERS or 40
 -- INIT broadcasts are debounced so a burst of triggers (e.g.,
 -- GROUP_ROSTER_UPDATE firing several times during a roster cascade)
 -- generates one wire message, not many.
@@ -56,10 +57,20 @@ local function GetTrackedSetForLocalSpec()
 	return ns.GetTrackedForSpec(specId)
 end
 
--- Player first so self always renders at a stable position.
+-- Player first so self always renders at a stable position. In raids
+-- the partyN tokens are empty — Blizzard switches to raidN — so we have
+-- to branch. UnitIsUnit skips the raid slot the player occupies, to
+-- avoid double-rendering self.
 local function IterateGroupUnits()
 	local units = { "player" }
-	if IsInGroup() then
+	if IsInRaid() then
+		for i = 1, MAX_RAID do
+			local u = "raid" .. i
+			if UnitExists(u) and not UnitIsUnit(u, "player") then
+				units[#units + 1] = u
+			end
+		end
+	elseif IsInGroup() then
 		for i = 1, MAX_PARTY do
 			local u = "party" .. i
 			if UnitExists(u) then
@@ -243,12 +254,24 @@ local function ScheduleReadyBroadcast(spellId, duration)
 	end)
 end
 
+-- Resolve the cooldown duration to use for a spell. Manual override (set
+-- in Settings) wins over the API lookup — that's the entire reason it
+-- exists, since GetSpellBaseCooldown returns wrong values for some
+-- spells in the database. Returns nil only when both the override is
+-- absent AND the API returned a sub-2s value (i.e., this isn't a real
+-- CD worth tracking).
+local function ResolveDuration(spellId)
+	local override = ns.GetCooldownOverride(spellId)
+	if override and override > 0 then return override end
+	return GetCachedBaseCooldown(spellId)
+end
+
 function Tracker:OnLocalCast(spellId)
 	if not ns.IsEnabled() then return end
 	local tracked = GetTrackedSetForLocalSpec()
 	if not tracked or not tracked[spellId] then return end
 
-	local duration = GetCachedBaseCooldown(spellId)
+	local duration = ResolveDuration(spellId)
 	if not duration then return end
 
 	RecordUsed("player", spellId, duration)
@@ -295,10 +318,10 @@ function Tracker:OnRemoteMessage(sender, verb, payload)
 	end
 
 	if verb == "USED" then
-		-- Base CD from the spell database — same on every client. 60s
-		-- fallback only triggers for spells with no static CD (rare for
-		-- the major-CD scope this addon tracks).
-		local duration = GetCachedBaseCooldown(spellId) or 60
+		-- Override > API > 60s fallback. Override path means a receiver
+		-- and sender configured with the same override show the same
+		-- swipe length, regardless of what their spell database says.
+		local duration = ResolveDuration(spellId) or 60
 		RecordUsed(unit, spellId, duration)
 	elseif verb == "READY" then
 		RecordReady(unit, spellId)

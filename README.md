@@ -4,7 +4,7 @@ A small WoW retail addon that lets a 5-man dungeon group **see each other's majo
 
 How it works in one line: each client broadcasts when it casts a tracked spell over a hidden addon-message channel; receivers render that as an icon with a cooldown swipe on the sender's party frame.
 
-Status: **v0.4.0** — untested in a live group as of this commit. Code complete; awaiting in-game verification.
+Status: **v0.6.0** — untested in a live group as of this commit. Code complete; awaiting in-game verification.
 
 ---
 
@@ -77,9 +77,26 @@ If a party member runs none of those addons, their spec is unknown and their row
 
 ### Display
 
-One icon row per party unit, attached to the unit's Blizzard party frame (`CompactPartyFrameMemberN` or `PartyFrame.MemberFrameN`). When the frame isn't found (typical for ElvUI / Grid2 / Vuhdo / Cell users), rows fall back to a `LibEditMode`-managed anchor. A 1s ticker re-resolves the party frame so toggling layouts (solo → party → raid) doesn't strand rows on a hidden anchor target.
+One icon row per group unit, attached to the unit's Blizzard frame. Supports:
+
+- **Party frames** — `CompactPartyFrameMemberN`, `PartyFrame.MemberFrameN`
+- **Raid frames** — `CompactRaidFrameN` (also picked up when "Raid-style frames for parties" is enabled)
+
+When no matching frame is visible (typical for ElvUI / Grid2 / Vuhdo / Cell users), rows fall back to a `LibEditMode`-managed anchor and stagger vertically. A 1s ticker re-resolves the frame so toggling layouts (solo → party → raid) doesn't strand rows on a hidden anchor target.
 
 Icons: bright when ready, desaturated + clockwise swipe + countdown text when on cooldown. Spell tooltip on hover.
+
+**Sizing & positioning** are tunable in the Settings panel's "Display" column:
+
+| Setting          | Default  | Range    | Effect                                                              |
+| ---------------- | -------- | -------- | ------------------------------------------------------------------- |
+| Icon size        | 24 px    | 12–64    | Width and height of every icon.                                     |
+| Icon spacing     | 2 px     | 0–16     | Gap between icons.                                                  |
+| Grow direction   | Right    | Left/Right | Which way the row extends from the unit's frame.                  |
+| Offset X         | 6 px     | -100–100 | Horizontal nudge between the frame edge and the row.                |
+| Offset Y         | 0 px     | -100–100 | Vertical nudge.                                                     |
+
+All changes apply immediately — sliders trigger `Display:UpdateAll` on every step. Persisted to `DzakSharedCDsDB.display`.
 
 ---
 
@@ -143,10 +160,22 @@ DzakSharedCDsDB = {
     enabled = true,
     debug = false,
     anchor = { point = "CENTER", x = 0, y = 0, enabled = true },
+    display = {
+        iconSize      = 24,
+        iconGap       = 2,
+        growDirection = "RIGHT",
+        offsetX       = 6,
+        offsetY       = 0,
+    },
     trackedSpellsBySpec = {
         [65]  = { [642] = true, [498] = true, ... },     -- Holy Paladin
         [256] = { [33206] = true, [62618] = true, ... }, -- Disc Priest
         ...
+    },
+    cooldownOverrides = {
+        [642]   = 300,   -- Divine Shield: force 5 min, ignore API
+        [33206] = 360,   -- Pain Suppression: force 6 min
+        -- absent entries fall through to GetSpellBaseCooldown
     },
 }
 ```
@@ -185,7 +214,7 @@ Internally wraps `LibSpecialization.RegisterGroup`.
 - Constant: `ns.Chat.PREFIX = "DSCD"`.
 
 ### `PartyFrames.lua`
-- `ns.PartyFrames:Resolve(unit)` → the Blizzard frame for `unit`, or nil if none is visible. Supports `CompactPartyFrameMemberN` and `PartyFrame.MemberFrameN` only.
+- `ns.PartyFrames:Resolve(unit)` → the Blizzard frame for `unit`, or nil if none is visible. Supports `CompactRaidFrameN` (preferred in raids), `CompactPartyFrameMemberN`, and `PartyFrame.MemberFrameN`. Falls back to a CompactRaid scan to catch the "Raid-style frames for parties" mode.
 
 ### `Tracker.lua`
 - `ns.Tracker:GetUnitState(unit)` → `{ [spellId] = { startTime, duration, readyAt } }`.
@@ -206,19 +235,22 @@ Internally wraps `LibSpecialization.RegisterGroup`.
 - `ns.EnsureSpecSeeded(specId)` — lazy default-seeding.
 - `ns.GetTrackedForSpec(specId)` → that spec's tracked set (or nil).
 - `ns.ResetSpecToDefaults(specId)` / `ns.AddTracked(specId, spellId)` / `ns.RemoveTracked(specId, spellId)`.
+- `ns.GetDisplaySetting(key)` / `ns.SetDisplaySetting(key, value)` / `ns.ResetDisplayDefaults()` — display config, persisted to `DzakSharedCDsDB.display`; setter triggers `Display:UpdateAll`.
+- Constant: `ns.DEFAULT_DISPLAY` — single source of truth for the display defaults table.
+- `ns.GetCooldownOverride(spellId)` / `ns.SetCooldownOverride(spellId, seconds)` — manual per-spell duration override. Returns nil / passes nil-or-≤0 to clear. Consulted by Tracker on both local cast and remote receive paths.
 - Slash: `/dscd`, `/dscd status`, `/dscd init`, `/dscd broadcast`, `/dscd ping`.
 
 ### `Settings.lua`
-- Blizzard Settings canvas: master Enable checkbox + spec dropdown (grouped by class) + per-spec spell list with Add / per-row Remove / Reset This Spec.
+- Blizzard Settings canvas. Left column: master Enable checkbox + spec dropdown (grouped by class) + per-spec spell list. Each row has the icon, ID + name, a small **CD override** EditBox (blank = use API, number = force seconds), and an X to remove. Right column: Display settings (icon size, spacing, grow direction, X/Y offset, Reset display defaults). Bottom: slash command reference.
 - `ns.OpenSettings()` opens the panel programmatically.
 
 ---
 
 ## Known limitations / caveats
 
-1. **Cooldown durations are base values, not runtime-modified.** For the local player we cache `C_Spell.GetSpellBaseCooldown(spellId)` at the moment we build the advertised set (using `GetSpellCooldown` at `UNIT_SPELLCAST_SUCCEEDED` time races the engine — it returns 0 or just the GCD). For remote players we look up the same base cooldown on the *receiver's* client. Either way, talent-based CDR (Glimmer-style reductions, etc.) is not reflected. Tradeoff for not maintaining a spec-aware cooldown database.
+1. **Cooldown durations are base values, not runtime-modified.** For the local player we cache `C_Spell.GetSpellBaseCooldown(spellId)` at the moment we build the advertised set (using `GetSpellCooldown` at `UNIT_SPELLCAST_SUCCEEDED` time races the engine — it returns 0 or just the GCD). For remote players we look up the same base cooldown on the *receiver's* client. Either way, talent-based CDR (Glimmer-style reductions, etc.) is not reflected. **Workaround**: each row in the Settings spell list has a small "CD override" field — type the correct duration in seconds and it'll win over the API on both the send and receive paths. Leave it blank to use the API value. Stored globally per spell ID in `DzakSharedCDsDB.cooldownOverrides`.
 
-2. **No third-party UI support yet.** Rows attach to default Blizzard frames only (`CompactPartyFrameMemberN`, `PartyFrame.MemberFrameN`). ElvUI / Grid2 / Vuhdo / Cell / NDui users fall back to the LibEditMode anchor. Adding more is straightforward — mirror the patterns in MiniCC's `Core/Frames.lua`.
+2. **No third-party UI support yet.** Rows attach to default Blizzard frames only (`CompactPartyFrameMemberN`, `PartyFrame.MemberFrameN`, `CompactRaidFrameN`). ElvUI / Grid2 / Vuhdo / Cell / NDui users fall back to the LibEditMode anchor. Adding more is straightforward — mirror the patterns in MiniCC's `Core/Frames.lua`.
 
 3. **Spec discovery requires LibSpecialization on the party member's side.** Standalone but most addons ship it. Without it, their row stays hidden because we don't know their spec.
 

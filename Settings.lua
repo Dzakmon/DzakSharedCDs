@@ -146,6 +146,135 @@ content:SetSize(LIST_WIDTH - 20, 1)
 scroll:SetScrollChild(content)
 
 -- ============================================================
+-- DISPLAY SECTION (right column, next to the spell list)
+-- All controls call ns.SetDisplaySetting which persists + triggers
+-- ns.Display:UpdateAll, so every drag of a slider re-lays-out rows.
+-- ============================================================
+
+local DISPLAY_COL_WIDTH = 220
+
+local dispTitle = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+dispTitle:SetPoint("TOPLEFT", scroll, "TOPRIGHT", 24, 0)
+dispTitle:SetText("Display")
+
+local dispDesc = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+dispDesc:SetPoint("TOPLEFT", dispTitle, "BOTTOMLEFT", 0, -4)
+dispDesc:SetWidth(DISPLAY_COL_WIDTH)
+dispDesc:SetJustifyH("LEFT")
+dispDesc:SetText("Live preview — changes apply immediately to every party / raid row.")
+dispDesc:SetTextColor(0.7, 0.7, 0.7)
+
+-- Slider factory. Anchors below `previousAnchor` (a frame or fontstring
+-- with a TOPLEFT). Returns the slider so subsequent ones can stack.
+local function MakeSlider(label, min, max, step, key, formatFn, previousAnchor, topOffset)
+	local slider = CreateFrame("Slider", nil, optionsFrame, "OptionsSliderTemplate")
+	slider:SetWidth(DISPLAY_COL_WIDTH - 20)
+	slider:SetHeight(16)
+	slider:SetMinMaxValues(min, max)
+	slider:SetValueStep(step)
+	slider:SetObeyStepOnDrag(true)
+	slider:SetPoint("TOPLEFT", previousAnchor, "BOTTOMLEFT", 0, topOffset or -28)
+
+	-- OptionsSliderTemplate auto-creates $parentLow / $parentHigh /
+	-- $parentText FontStrings, but only with a name. Our slider is
+	-- anonymous, so walk regions and identify by the template's default
+	-- text content ("Low" / "High" / "Slider"). Safe because this runs
+	-- before any of our SetText calls.
+	for _, region in ipairs({ slider:GetRegions() }) do
+		if region.GetObjectType and region:GetObjectType() == "FontString" then
+			local t = region:GetText()
+			if t == "Low" then slider.Low = region
+			elseif t == "High" then slider.High = region
+			else slider.Text = region end
+		end
+	end
+
+	if slider.Low then slider.Low:SetText(tostring(min)) end
+	if slider.High then slider.High:SetText(tostring(max)) end
+
+	local valueLabel = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+	valueLabel:SetPoint("BOTTOMLEFT", slider, "TOPLEFT", 0, 2)
+
+	local function RefreshLabel()
+		local v = ns.GetDisplaySetting(key)
+		valueLabel:SetText(string.format("%s: |cffffd100%s|r", label, formatFn and formatFn(v) or tostring(v)))
+	end
+	RefreshLabel()
+
+	slider:SetValue(ns.GetDisplaySetting(key))
+	slider:SetScript("OnValueChanged", function(self, value, isUserInput)
+		-- Snap to step (OnValueChanged can fire with sub-step values
+		-- during drag). Round to nearest step boundary.
+		local snapped = math.floor((value / step) + 0.5) * step
+		if snapped ~= ns.GetDisplaySetting(key) then
+			ns.SetDisplaySetting(key, snapped)
+		end
+		RefreshLabel()
+	end)
+
+	slider.Refresh = RefreshLabel
+	return slider
+end
+
+local iconSizeSlider = MakeSlider("Icon size", 12, 64, 1, "iconSize",
+	function(v) return v .. " px" end, dispDesc, -36)
+
+local iconGapSlider = MakeSlider("Icon spacing", 0, 16, 1, "iconGap",
+	function(v) return v .. " px" end, iconSizeSlider, -28)
+
+-- Grow direction dropdown
+local growLabel = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+growLabel:SetPoint("TOPLEFT", iconGapSlider, "BOTTOMLEFT", 0, -22)
+growLabel:SetText("Grow direction")
+
+local growDropdown = CreateFrame("Frame", "DzakSharedCDsGrowDropdown", optionsFrame, "UIDropDownMenuTemplate")
+growDropdown:SetPoint("TOPLEFT", growLabel, "BOTTOMLEFT", -16, -4)
+
+local function RefreshGrowDropdown()
+	local current = ns.GetDisplaySetting("growDirection")
+	UIDropDownMenu_SetSelectedValue(growDropdown, current)
+	UIDropDownMenu_SetText(growDropdown, current == "LEFT" and "Left" or "Right")
+end
+
+UIDropDownMenu_Initialize(growDropdown, function(_, level)
+	for _, opt in ipairs({ { v = "RIGHT", label = "Right" }, { v = "LEFT", label = "Left" } }) do
+		local entry = UIDropDownMenu_CreateInfo()
+		entry.text = opt.label
+		entry.value = opt.v
+		entry.checked = (ns.GetDisplaySetting("growDirection") == opt.v)
+		entry.func = function()
+			ns.SetDisplaySetting("growDirection", opt.v)
+			RefreshGrowDropdown()
+		end
+		UIDropDownMenu_AddButton(entry, level)
+	end
+end)
+UIDropDownMenu_SetWidth(growDropdown, DISPLAY_COL_WIDTH - 36)
+
+local offsetXSlider = MakeSlider("Offset X", -100, 100, 1, "offsetX",
+	function(v) return v .. " px" end, growDropdown, -28)
+
+local offsetYSlider = MakeSlider("Offset Y", -100, 100, 1, "offsetY",
+	function(v) return v .. " px" end, offsetXSlider, -28)
+
+local dispReset = CreateFrame("Button", nil, optionsFrame, "UIPanelButtonTemplate")
+dispReset:SetSize(DISPLAY_COL_WIDTH - 20, 22)
+dispReset:SetPoint("TOPLEFT", offsetYSlider, "BOTTOMLEFT", 0, -16)
+dispReset:SetText("Reset display defaults")
+dispReset:SetScript("OnClick", function()
+	ns.ResetDisplayDefaults()
+	iconSizeSlider:SetValue(ns.GetDisplaySetting("iconSize"))
+	iconGapSlider:SetValue(ns.GetDisplaySetting("iconGap"))
+	offsetXSlider:SetValue(ns.GetDisplaySetting("offsetX"))
+	offsetYSlider:SetValue(ns.GetDisplaySetting("offsetY"))
+	iconSizeSlider:Refresh()
+	iconGapSlider:Refresh()
+	offsetXSlider:Refresh()
+	offsetYSlider:Refresh()
+	RefreshGrowDropdown()
+end)
+
+-- ============================================================
 -- SLASH COMMANDS REFERENCE
 -- Lives in the panel so users discover commands without having
 -- to remember to type `/dscd ?`. Keep in sync with Main.lua's
@@ -193,16 +322,50 @@ local function MakeRow(parent)
 	row.icon:SetPoint("LEFT", 4, 0)
 	row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
-	row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-	row.label:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
-	row.label:SetPoint("RIGHT", -36, 0)
-	row.label:SetJustifyH("LEFT")
-	row.label:SetWordWrap(false)
-
 	row.remove = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
 	row.remove:SetSize(28, 22)
 	row.remove:SetPoint("RIGHT", -2, 0)
 	row.remove:SetText("X")
+
+	-- Manual CD override: blank = use API lookup, number = force that
+	-- many seconds. Tooltip on hover shows the API-reported value so
+	-- the user can compare against what they're typing.
+	row.cdInput = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
+	row.cdInput:SetSize(40, 18)
+	row.cdInput:SetPoint("RIGHT", row.remove, "LEFT", -8, 0)
+	row.cdInput:SetAutoFocus(false)
+	row.cdInput:SetNumeric(true)
+	row.cdInput:SetMaxLetters(4)
+	row.cdInput:SetTextInsets(4, 4, 0, 0)
+	row.cdInput:SetFontObject("GameFontHighlight")
+	row.cdInput:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+	row.cdInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+	row.cdInput:SetScript("OnEnter", function(self)
+		if not self.spellId then return end
+		local override = ns.GetCooldownOverride(self.spellId)
+		local apiMs = C_Spell.GetSpellBaseCooldown and C_Spell.GetSpellBaseCooldown(self.spellId)
+		local apiSecs = apiMs and apiMs >= 1000 and (apiMs / 1000) or nil
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:SetText("Cooldown override (sec)")
+		GameTooltip:AddLine("Blank = use API value.", 0.7, 0.7, 0.7, true)
+		if apiSecs then
+			GameTooltip:AddLine(string.format("|cffaaaaaaAPI reports:|r %.0fs", apiSecs))
+		else
+			GameTooltip:AddLine("|cffaaaaaaAPI reports:|r (none)")
+		end
+		if override then
+			GameTooltip:AddLine(string.format("|cff66ff66Active override:|r %ds", override))
+		end
+		GameTooltip:Show()
+	end)
+	row.cdInput:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+	row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+	row.label:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
+	row.label:SetPoint("RIGHT", row.cdInput, "LEFT", -6, 0)
+	row.label:SetJustifyH("LEFT")
+	row.label:SetWordWrap(false)
 
 	return row
 end
@@ -238,6 +401,24 @@ RebuildList = function()
 		row.remove:SetScript("OnClick", function()
 			ns.RemoveTracked(specForCallback, id)
 			RebuildList()
+		end)
+
+		-- Override field: show current value (or blank). Save on focus
+		-- loss so users can tab/click away without an explicit submit.
+		row.cdInput.spellId = id
+		local override = ns.GetCooldownOverride(id)
+		row.cdInput:SetText(override and tostring(override) or "")
+		row.cdInput:SetScript("OnEditFocusLost", function(self)
+			local raw = self:GetText() or ""
+			local n = tonumber(raw)
+			-- Empty input or 0 = clear the override (SetCooldownOverride
+			-- treats <=0 as clear). Don't store back the API value when
+			-- the user blanks the field — we want "use API" sticky.
+			ns.SetCooldownOverride(id, n)
+			-- Re-read to confirm what got persisted (covers the
+			-- clear-on-0 case) and re-display normalized.
+			local saved = ns.GetCooldownOverride(id)
+			self:SetText(saved and tostring(saved) or "")
 		end)
 	end
 
@@ -285,6 +466,18 @@ optionsFrame:SetScript("OnShow", function()
 	UIDropDownMenu_SetSelectedValue(specDropdown, currentSpecId)
 	UIDropDownMenu_SetText(specDropdown, ns.FormatSpecLabel(currentSpecId))
 	RebuildList()
+
+	-- Pull current display values back into the controls. Sliders are
+	-- silent about external changes; we re-seed them on every open.
+	iconSizeSlider:SetValue(ns.GetDisplaySetting("iconSize"))
+	iconGapSlider:SetValue(ns.GetDisplaySetting("iconGap"))
+	offsetXSlider:SetValue(ns.GetDisplaySetting("offsetX"))
+	offsetYSlider:SetValue(ns.GetDisplaySetting("offsetY"))
+	iconSizeSlider:Refresh()
+	iconGapSlider:Refresh()
+	offsetXSlider:Refresh()
+	offsetYSlider:Refresh()
+	RefreshGrowDropdown()
 end)
 
 -- ============================================================
