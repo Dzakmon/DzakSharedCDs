@@ -58,6 +58,14 @@ function SpecCache:Init()
 		return
 	end
 	LS.RegisterGroup(self, OnSpecCallback)
-	-- LibSpecialization also fires its callback for the local player on
-	-- PLAYER_LOGIN, so the local spec lands in `byName` naturally too.
+
+	-- LibSpecialization's PLAYER_LOGIN-triggered broadcast fires BEFORE
+	-- we register here (we boot on PLAYER_ENTERING_WORLD which comes
+	-- later), so our callback wouldn't otherwise fire for our OWN spec
+	-- until the next ACTIVE_COMBAT_CONFIG_CHANGED / GROUP_ROSTER_UPDATE.
+	-- Force-poke it now so the local player's spec lands immediately and
+	-- our first INIT can include real data.
+	if LS.RequestGroupSpecialization then
+		LS.RequestGroupSpecialization()
+	end
 end

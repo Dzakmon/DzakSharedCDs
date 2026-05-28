@@ -4,7 +4,7 @@ A small WoW retail addon that lets a 5-man dungeon group **see each other's majo
 
 How it works in one line: each client broadcasts when it casts a tracked spell over a hidden addon-message channel; receivers render that as an icon with a cooldown swipe on the sender's party frame.
 
-Status: **v0.6.0** — untested in a live group as of this commit. Code complete; awaiting in-game verification.
+Status: **v0.6.1** — first live-tested build. Communication confirmed working between clients.
 
 ---
 
@@ -80,9 +80,9 @@ As a second line of defense against state pollution, `PruneRoster` records each 
 
 ### The INIT handshake
 
-On a ready check (and a few other natural moments), every client broadcasts an `INIT` message listing the spells in their tracked set that they **actually have talented** (filtered by `IsPlayerSpell`). Receivers cache this per-sender; the display only renders spells in that cached set, so abilities a sender doesn't actually have don't sit on their row showing "ready" forever.
+On a ready check (and a few other natural moments), every client broadcasts an `INIT` message listing the spells in their tracked set that they **actually have talented** (filtered by `C_SpellBook.IsSpellKnown`). Receivers cache this per-sender; the display narrows to spells in that cached set, so abilities a sender doesn't actually have don't sit on their row showing "ready" forever.
 
-Until INIT is received from a sender, their row is **hidden entirely** — no guessing. The local player's row is always shown (their advertised set is computed on demand).
+Until INIT is received from a sender (but their spec is known), their row shows the **full tracked-for-spec list** as a best guess — better UX than a blank row during the handshake window. When INIT lands, the list shrinks to the advertised intersection.
 
 INIT triggers:
 
@@ -169,7 +169,7 @@ Settings ......................... uses ns.* helpers from Main + ClassDefaults
 | ------------------ | --------------------------------------------------------------------------- |
 | `/dscd`            | Open the Settings canvas panel.                                             |
 | `/dscd status`     | Print a one-screen state summary (enabled, local spec, specs configured, group/instance). |
-| `/dscd init`       | Print the spell list your next INIT broadcast would announce (tracked ∩ `IsPlayerSpell`). |
+| `/dscd init`       | Print the spell list your next INIT broadcast would announce (tracked ∩ `C_SpellBook.IsSpellKnown`). |
 | `/dscd broadcast`  | Force an immediate INIT broadcast (bypasses the debounce).                  |
 | `/dscd ping`       | Transport delivery test. Sends a ping; receivers print a visible confirmation. |
 | `/dscddebug`       | Toggle debug tracing (on/off/toggle). When on, every wire send + receive logs. |
@@ -241,8 +241,8 @@ Internally wraps `LibSpecialization.RegisterGroup`.
 
 ### `Tracker.lua`
 - `ns.Tracker:GetUnitState(unit)` → `{ [spellId] = { startTime, duration, readyAt } }`.
-- `ns.Tracker:GetAdvertisedForUnit(unit)` → `{ [spellId] = true }` or nil (no INIT received). For "player", computed on demand from `IsPlayerSpell`.
-- `ns.Tracker:BuildLocalAdvertisedSet()` → the intersection of current spec's tracked list ∩ `IsPlayerSpell`.
+- `ns.Tracker:GetAdvertisedForUnit(unit)` → `{ [spellId] = true }` or nil (no INIT received). For "player", computed on demand from `C_SpellBook.IsSpellKnown`.
+- `ns.Tracker:BuildLocalAdvertisedSet()` → the intersection of current spec's tracked list ∩ `C_SpellBook.IsSpellKnown`.
 - `ns.Tracker:ScheduleInitBroadcast(delaySeconds?)` — debounced INIT send.
 - `ns.Tracker:OnLocalCast(spellId)` — entry point used by `UNIT_SPELLCAST_SUCCEEDED`.
 - `ns.Tracker:OnRemoteMessage(sender, verb, payload)` — entry point used by `Chat`.

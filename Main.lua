@@ -164,6 +164,14 @@ local function OnSpecChange(playerShortName, specId)
 	-- Seed their spec's default list and trigger a display refresh.
 	ns.EnsureSpecSeeded(specId)
 	if ns.Display then ns.Display:UpdateAll() end
+	-- Critical: re-broadcast our INIT. The PLAYER_ENTERING_WORLD
+	-- triggered INIT may have fired BEFORE our own spec was known
+	-- (LibSpecialization's callback for us doesn't always land in
+	-- time), in which case BuildLocalAdvertisedSet returned nil and
+	-- no INIT went out. Re-scheduling here covers both the "our spec
+	-- finally landed" and "a party member's spec landed, send so they
+	-- catch up" cases. The 2.5s debounce coalesces bursts.
+	if ns.Tracker then ns.Tracker:ScheduleInitBroadcast() end
 end
 
 local frame = CreateFrame("Frame")

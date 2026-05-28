@@ -26,6 +26,14 @@ local LIST_WIDTH = 540
 
 local optionsFrame = CreateFrame("Frame", "DzakSharedCDsOptionsFrame", UIParent)
 optionsFrame:Hide()
+-- Explicit fallback size. Blizzard's canvas re-parents and re-anchors
+-- this frame when the category is shown, so the in-game appearance
+-- comes from the canvas, not these dimensions. But if the canvas
+-- pipeline ever fails to size us (race conditions, future Blizzard
+-- changes), this keeps the scroll-frame anchors below from collapsing
+-- to a 0-height region — which was the "only one spell visible"
+-- failure mode before this line existed.
+optionsFrame:SetSize(720, 600)
 
 local title = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 title:SetPoint("TOPLEFT", 16, -16)
@@ -63,17 +71,29 @@ local cmdHeader = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalL
 cmdHeader:SetPoint("TOPLEFT", enableCB, "BOTTOMLEFT", 0, -16)
 cmdHeader:SetText("Slash commands")
 
-local cmdBody = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-cmdBody:SetPoint("TOPLEFT", cmdHeader, "BOTTOMLEFT", 0, -6)
-cmdBody:SetJustifyH("LEFT")
-cmdBody:SetWidth(LIST_WIDTH)
-do
+-- Two-column layout. Six rows of help in one column ate ~85 px of
+-- vertical room and pushed the spell list's scroll-frame down to ~1
+-- row tall on smaller Settings canvases. Three rows × two columns
+-- halves that without losing any info.
+local cmdContainer = CreateFrame("Frame", nil, optionsFrame)
+cmdContainer:SetPoint("TOPLEFT", cmdHeader, "BOTTOMLEFT", 0, -6)
+cmdContainer:SetSize(LIST_WIDTH, 3 * 14 + 4)
+
+local function MakeHelpColumn(parent, xOffset, entries)
+	local fs = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+	fs:SetPoint("TOPLEFT", parent, "TOPLEFT", xOffset, 0)
+	fs:SetJustifyH("LEFT")
+	fs:SetWidth(LIST_WIDTH / 2 - 8)
 	local lines = {}
-	for i, entry in ipairs(SLASH_HELP) do
-		lines[i] = string.format("|cff66ddff%-18s|r  |cff999999—|r  %s", entry[1], entry[2])
+	for i, e in ipairs(entries) do
+		lines[i] = string.format("|cff66ddff%s|r  %s", e[1], e[2])
 	end
-	cmdBody:SetText(table.concat(lines, "\n"))
+	fs:SetText(table.concat(lines, "\n"))
+	return fs
 end
+
+MakeHelpColumn(cmdContainer, 0,                  { SLASH_HELP[1], SLASH_HELP[2], SLASH_HELP[3] })
+MakeHelpColumn(cmdContainer, LIST_WIDTH / 2 + 4, { SLASH_HELP[4], SLASH_HELP[5], SLASH_HELP[6] })
 
 -- ============================================================
 -- SPEC SELECTOR
@@ -82,7 +102,7 @@ end
 local currentSpecId = nil
 
 local specLabel = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-specLabel:SetPoint("TOPLEFT", cmdBody, "BOTTOMLEFT", 0, -18)
+specLabel:SetPoint("TOPLEFT", cmdContainer, "BOTTOMLEFT", 0, -18)
 specLabel:SetText("Spec")
 
 local specDesc = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -120,7 +140,11 @@ local function InitSpecDropdown(self, level)
 			end
 		end
 	elseif level == 2 then
-		local classToken = UIDROPDOWNMENU_MENU_VALUE
+		-- Blizzard's dropdown framework sets this global to the parent
+		-- entry's `value` field right before firing the level-2 init.
+		-- rawget bypasses the linter's field check — the global is
+		-- real but isn't in the lua-language-server stubs for _G.
+		local classToken = rawget(_G, "UIDROPDOWNMENU_MENU_VALUE")
 		for _, info in ipairs(ns.ALL_SPECS) do
 			if info.classToken == classToken then
 				local entry = UIDropDownMenu_CreateInfo()
@@ -226,7 +250,10 @@ local function MakeRow(parent)
 		local apiMs = C_Spell.GetSpellBaseCooldown and C_Spell.GetSpellBaseCooldown(self.spellId)
 		local apiSecs = apiMs and apiMs >= 1000 and (apiMs / 1000) or nil
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-		GameTooltip:SetText("Cooldown override (sec)")
+		-- Color args (1,1,1,1) match the default SetText() white-on-tooltip
+		-- look; passed explicitly because the linter's type stub treats
+		-- them as required even though the runtime defaults them.
+		GameTooltip:SetText("Cooldown override (sec)", 1, 1, 1, 1)
 		GameTooltip:AddLine("Blank = use API value.", 0.7, 0.7, 0.7, true)
 		if apiSecs then
 			GameTooltip:AddLine(string.format("|cffaaaaaaAPI reports:|r %.0fs", apiSecs))

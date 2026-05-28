@@ -167,16 +167,20 @@ end
 -- INIT FLOW: announce what we have, consume others' announcements
 -- ============================================================
 
+-- C_SpellBook.IsSpellKnown is the modern (12.0+) replacement for the
+-- deprecated IsPlayerSpell. Returns true if the local player currently
+-- has the spell available — covers class/spec baseline AND talent
+-- choices, including talent replacements (e.g., choosing Crusade
+-- removes the base Avenging Wrath from the known set). Local alias so
+-- the per-spell loop below avoids the table lookup on the hot path.
+local IsSpellKnownByPlayer = C_SpellBook.IsSpellKnown
+
 function Tracker:BuildLocalAdvertisedSet()
 	local tracked = GetTrackedSetForLocalSpec()
 	if not tracked then return nil end
 	local set = {}
 	for spellId in pairs(tracked) do
-		-- IsPlayerSpell returns true if the local player currently has
-		-- the spell available — covers class/spec baseline AND talent
-		-- choices, including talent replacements (e.g., choosing Crusade
-		-- removes the base Avenging Wrath from IsPlayerSpell).
-		if IsPlayerSpell(spellId) then
+		if IsSpellKnownByPlayer(spellId) then
 			set[spellId] = true
 			-- Prime the CD cache while we already know this is a real spell
 			-- the player has. Avoids the first cast missing its swipe.

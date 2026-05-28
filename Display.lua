@@ -34,28 +34,29 @@ local function GetCfg()
 end
 
 local function GetTrackedSortedForUnit(unit)
-	-- Two pieces of information are needed before we can render a unit's
-	-- row: (1) what spells WE think their spec tracks (from defaults +
-	-- our edits in Settings), and (2) what spells THEY actually have
-	-- talented (from their INIT broadcast). The intersection is what
-	-- we draw.
-	--
-	-- If we haven't received INIT yet, we hide the row entirely rather
-	-- than guess — guessing leads to the "spells that show ready forever
-	-- because the sender doesn't actually have them" bug INIT exists to
-	-- fix. For the local player, Tracker computes advertised on demand
-	-- so there's never a "waiting for our own INIT" gap.
+	-- Render policy:
+	--   1. Spec unknown                 -> hide (no useful default to draw)
+	--   2. Spec known, no INIT received -> draw the full tracked-for-spec
+	--      list. Some icons may never light up (sender doesn't actually
+	--      have them), but "blank row until handshake" is worse UX than
+	--      "row shrinks when handshake lands".
+	--   3. Spec known, INIT received    -> filter to advertised only.
 	local specId = ns.SpecCache:GetSpecForUnit(unit)
 	if not specId then return nil end
 	local tracked = ns.GetTrackedForSpec(specId)
 	if not tracked then return nil end
 
 	local adv = ns.Tracker:GetAdvertisedForUnit(unit)
-	if not adv then return nil end
 
 	local list = {}
-	for id in pairs(tracked) do
-		if adv[id] then list[#list + 1] = id end
+	if adv then
+		for id in pairs(tracked) do
+			if adv[id] then list[#list + 1] = id end
+		end
+	else
+		for id in pairs(tracked) do
+			list[#list + 1] = id
+		end
 	end
 	table.sort(list)
 	return list
