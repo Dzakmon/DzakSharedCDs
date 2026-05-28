@@ -11,16 +11,19 @@
 Libs\LibStub\LibStub.lua
 
 # FerrozEditModeLib bundles its own LibStub + CallbackHandler-1.0 +
-# LibSharedMedia-3.0. LibStub's version-check naturally dedupes against
-# ours; we still load the bundled ones because Ferroz's TOC ordering
-# expects them.
+# LibSharedMedia-3.0. We load the bundled LibStub too — LibStub is
+# version-dedupe-safe, and matching Ferroz's own TOC order avoids any
+# load-time lookup expecting it on disk at this path.
+Libs\FerrozEditModeLib\Libs\LibStub\LibStub.lua
 Libs\FerrozEditModeLib\Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
 Libs\FerrozEditModeLib\Libs\LibSharedMedia-3.0\LibSharedMedia-3.0.lua
 Libs\FerrozEditModeLib\FerrozEditModeLib.lua
 Libs\FerrozEditModeLib\FerrozConfigWindow.lua
 
 # NoobTaco-Config: schema-driven settings UI. Its own LibStub redirects
-# to ours; Internal/* are the engine modules.
+# to ours; Internal/* are the engine modules. Same load-order rule —
+# load its bundled LibStub first to match the lib's own TOC.
+Libs\NoobTaco-Config\Internal\LibStub.lua
 Libs\NoobTaco-Config\NoobTaco-Config.lua
 Libs\NoobTaco-Config\Themes\Theme.lua
 Libs\NoobTaco-Config\Internal\Schema.lua
@@ -28,7 +31,8 @@ Libs\NoobTaco-Config\Internal\State.lua
 Libs\NoobTaco-Config\Internal\Layout.lua
 Libs\NoobTaco-Config\Internal\Renderer.lua
 
-Libs\LibSpecialization\LibSpecialization.lua
+Libs\LibSpecialization\LibStub\LibStub.lua
+Libs\LibSpecialization\LibSpecialization\LibSpecialization.lua
 
 # ============ Addon source ============
 Debug.lua

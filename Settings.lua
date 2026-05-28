@@ -1,4 +1,8 @@
--- Blizzard Settings canvas hosting a NoobTaco-Config two-column layout.
+-- Standalone NoobTaco-Config window — NoobTaco's layout system is
+-- designed to own its host window (custom themed buttons, sidebar
+-- scrollbar, Poppins fonts), so embedding it inside Blizzard's
+-- RegisterCanvasLayoutCategory fights the lib's design. We host it in
+-- our own draggable popup and open it from /dscd.
 --
 -- Left column (sidebar): General / Spells / About section buttons.
 -- Right column (content): re-rendered every time the user clicks a
@@ -19,6 +23,22 @@ if NTC then
 	Layout = NTC.Layout
 	Renderer = NTC.Renderer
 	ConfigState = NTC.State
+
+	-- NoobTaco-Config's NoobTaco-Config.lua hardcodes the embed media
+	-- path as Interface\AddOns\<addon>\Libraries\NoobTaco-Config\Media.
+	-- We embed at Libs\, not Libraries\, so Theme.Fonts ends up pointing
+	-- at a non-existent .ttf and Theme:CreateThemedButton errors with
+	-- "Invalid font file asset". Patch NTC.Media + Theme.Fonts in place
+	-- so every downstream Theme:ApplyFont call resolves correctly.
+	local realMedia = "Interface\\AddOns\\" .. addonName .. "\\Libs\\NoobTaco-Config\\Media"
+	NTC.Media = realMedia
+	if NTC.Theme then
+		NTC.Theme.Fonts = {
+			Normal    = realMedia .. "\\Fonts\\Poppins-Medium.ttf",
+			Bold      = realMedia .. "\\Fonts\\Poppins-Bold.ttf",
+			ExtraBold = realMedia .. "\\Fonts\\Poppins-ExtraBold.ttf",
+		}
+	end
 end
 
 local UNKNOWN_ICON = 134400
@@ -27,14 +47,45 @@ local ROW_GAP = 2
 local LIST_INSET = 16
 
 -- ============================================================
--- ROOT CANVAS — registered with Blizzard Settings so users find us
--- under Options -> AddOns -> DzakSharedCDs. NoobTaco-Config's Layout
--- attaches inside this frame.
+-- STANDALONE WINDOW — movable + closable popup, opened from /dscd.
+-- NoobTaco-Config's two-column layout attaches inside `body` so
+-- the title bar + close button sit outside the lib's layout area.
 -- ============================================================
 
-local optionsFrame = CreateFrame("Frame", "DzakSharedCDsOptionsFrame", UIParent)
+local optionsFrame = CreateFrame("Frame", "DzakSharedCDsOptionsFrame", UIParent, "BackdropTemplate")
 optionsFrame:Hide()
 optionsFrame:SetSize(720, 600)
+optionsFrame:SetPoint("CENTER")
+optionsFrame:SetFrameStrata("HIGH")
+optionsFrame:SetClampedToScreen(true)
+optionsFrame:SetBackdrop({
+	bgFile   = "Interface/Tooltips/UI-Tooltip-Background",
+	edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+	edgeSize = 16,
+	insets   = { left = 4, right = 4, top = 4, bottom = 4 },
+})
+optionsFrame:SetBackdropColor(0, 0, 0, 0.92)
+
+-- Drag-to-move from the title bar area.
+optionsFrame:SetMovable(true)
+optionsFrame:EnableMouse(true)
+optionsFrame:RegisterForDrag("LeftButton")
+optionsFrame:SetScript("OnDragStart", optionsFrame.StartMoving)
+optionsFrame:SetScript("OnDragStop", optionsFrame.StopMovingOrSizing)
+
+local titleBar = optionsFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+titleBar:SetPoint("TOP", optionsFrame, "TOP", 0, -12)
+titleBar:SetText("DzakSharedCDs")
+
+local closeBtn = CreateFrame("Button", nil, optionsFrame, "UIPanelCloseButton")
+closeBtn:SetPoint("TOPRIGHT", optionsFrame, "TOPRIGHT", -4, -4)
+
+-- NoobTaco's Layout:CreateTwoColumnLayout uses SetAllPoints on its
+-- container — so we host it inside `body`, which insets to leave room
+-- for our title bar and frame border.
+local body = CreateFrame("Frame", nil, optionsFrame)
+body:SetPoint("TOPLEFT", optionsFrame, "TOPLEFT", 10, -36)
+body:SetPoint("BOTTOMRIGHT", optionsFrame, "BOTTOMRIGHT", -10, 10)
 
 local layoutContainer = nil
 local currentSpecId = nil
@@ -393,7 +444,7 @@ local function EnsureLayout()
 		ConfigState:Initialize(DzakSharedCDsDB)
 	end
 
-	layoutContainer = Layout:CreateTwoColumnLayout(optionsFrame)
+	layoutContainer = Layout:CreateTwoColumnLayout(body)
 
 	Layout:AddSidebarButton(layoutContainer, "general", "General", function()
 		sectionRenderers.general(layoutContainer.ContentChild)
@@ -413,12 +464,15 @@ end
 optionsFrame:SetScript("OnShow", EnsureLayout)
 
 -- ============================================================
--- BLIZZARD SETTINGS REGISTRATION
+-- /dscd ENTRY POINT
+-- /dscd → toggle the window. NoobTaco's Layout is built lazily on
+-- first show; subsequent opens just :Show() the existing frame.
 -- ============================================================
 
-local category = Settings.RegisterCanvasLayoutCategory(optionsFrame, "DzakSharedCDs")
-Settings.RegisterAddOnCategory(category)
-
 ns.OpenSettings = function()
-	Settings.OpenToCategory(category:GetID())
+	if optionsFrame:IsShown() then
+		optionsFrame:Hide()
+	else
+		optionsFrame:Show()
+	end
 end

@@ -12,12 +12,51 @@ ns.Anchor = Anchor
 
 -- ============================================================
 -- THE FRAME
+-- A plain Frame with a backdrop so the user can actually see it
+-- when entering Edit Mode (Ferroz only enables drag — it doesn't
+-- give the frame a visible representation). Outside Edit Mode the
+-- backdrop stays faint so it doesn't clutter the screen; the
+-- EditMode.Enter callback below brightens it.
 -- ============================================================
 
-local anchor = CreateFrame("FRAME", "DzakSharedCDsAnchor", UIParent)
+local anchor = CreateFrame("FRAME", "DzakSharedCDsAnchor", UIParent, "BackdropTemplate")
 anchor:SetClampedToScreen(true)
 anchor:SetSize(200, 28)
+anchor:SetBackdrop({
+	bgFile   = "Interface/Buttons/WHITE8X8",
+	edgeFile = "Interface/Buttons/WHITE8X8",
+	edgeSize = 1,
+	insets   = { left = 1, right = 1, top = 1, bottom = 1 },
+})
+-- Idle colours: faint, low-contrast — barely visible during gameplay.
+anchor:SetBackdropColor(0, 0, 0, 0.15)
+anchor:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.4)
+
+local anchorLabel = anchor:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+anchorLabel:SetPoint("CENTER")
+anchorLabel:SetText("DzakSharedCDs")
+anchorLabel:SetAlpha(0.4)
+
 ns.anchorFrame = anchor
+
+-- Brighten the anchor while Edit Mode is active so the user can find
+-- and drag it; restore the faint idle look on exit.
+local function SetEditModeAppearance(active)
+	if active then
+		anchor:SetBackdropColor(0.25, 0.45, 1, 0.35)
+		anchor:SetBackdropBorderColor(0.6, 0.8, 1, 1)
+		anchorLabel:SetAlpha(1)
+	else
+		anchor:SetBackdropColor(0, 0, 0, 0.15)
+		anchor:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.4)
+		anchorLabel:SetAlpha(0.4)
+	end
+end
+
+if EventRegistry and EventRegistry.RegisterCallback then
+	EventRegistry:RegisterCallback("EditMode.Enter", function() SetEditModeAppearance(true)  end)
+	EventRegistry:RegisterCallback("EditMode.Exit",  function() SetEditModeAppearance(false) end)
+end
 
 -- ============================================================
 -- DB MIGRATION (v0.6.x -> v0.7.0)
@@ -203,6 +242,12 @@ C_Timer.After(0, function()
 	end
 
 	lib:Register(anchor, DzakSharedCDsDB.anchor, { height = 28, width = 200 })
+
+	-- Ferroz's Register doesn't call :Show() — it only applies layout
+	-- state. Without an explicit Show, the anchor stays hidden outside
+	-- Edit Mode, which strands fallback-attached icon rows (Display.lua's
+	-- AnchorRowToUnit branch that runs when no party frame is resolved).
+	anchor:Show()
 
 	if ns.Debug then ns.Debug:print("anchor", "registered with FerrozEditModeLib") end
 end)
