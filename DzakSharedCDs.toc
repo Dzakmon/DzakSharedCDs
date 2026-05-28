@@ -1,15 +1,36 @@
 ## Interface: 120005, 120007
 ## Title: DzakSharedCDs
-## Notes: Broadcasts your tracked spell cooldowns to addon-using party members and shows theirs back, via a hidden chat-prefix channel.
+## Notes: Broadcasts your tracked spell cooldowns to addon-using party members and shows theirs back, via a hidden addon-message channel.
 ## Author: Dzak
-## Version: 0.6.1
+## Version: 0.7.0
 ## SavedVariables: DzakSharedCDsDB
 ## IconTexture: Interface\Icons\Spell_Holy_BorrowedTime
 
+# ============ Embedded libraries ============
+# LibStub first — every other lib gates registration through it.
 Libs\LibStub\LibStub.lua
-Libs\LibEditMode\embed.xml
+
+# FerrozEditModeLib bundles its own LibStub + CallbackHandler-1.0 +
+# LibSharedMedia-3.0. LibStub's version-check naturally dedupes against
+# ours; we still load the bundled ones because Ferroz's TOC ordering
+# expects them.
+Libs\FerrozEditModeLib\Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\FerrozEditModeLib\Libs\LibSharedMedia-3.0\LibSharedMedia-3.0.lua
+Libs\FerrozEditModeLib\FerrozEditModeLib.lua
+Libs\FerrozEditModeLib\FerrozConfigWindow.lua
+
+# NoobTaco-Config: schema-driven settings UI. Its own LibStub redirects
+# to ours; Internal/* are the engine modules.
+Libs\NoobTaco-Config\NoobTaco-Config.lua
+Libs\NoobTaco-Config\Themes\Theme.lua
+Libs\NoobTaco-Config\Internal\Schema.lua
+Libs\NoobTaco-Config\Internal\State.lua
+Libs\NoobTaco-Config\Internal\Layout.lua
+Libs\NoobTaco-Config\Internal\Renderer.lua
+
 Libs\LibSpecialization\LibSpecialization.lua
 
+# ============ Addon source ============
 Debug.lua
 Anchor.lua
 ClassDefaults.lua

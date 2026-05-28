@@ -61,6 +61,26 @@ foreach ($name in $dirs) {
     }
 }
 
+# --- Strip documentation assets from bundled libs ----------------------------
+# NoobTaco-Config ships ~12 MB of PNG screenshots, fonts use ~750 KB, and the
+# nested LICENSE / CHANGELOG / README files add up. None are loaded at runtime,
+# so they're dead weight in the distributed zip. We exclude:
+#   - Screenshots/ folders (NoobTaco's CurseForge gallery)
+#   - *.md / *.txt / LICENSE / LICENSE.txt / License.txt
+#   - AI_USAGE.md
+# Fonts and Textures STAY because Theme.lua references them at runtime.
+$libsRoot = Join-Path $pkgRoot 'Libs'
+$junkDirs = @('Screenshots')
+foreach ($pattern in $junkDirs) {
+    Get-ChildItem -Path $libsRoot -Recurse -Directory -Filter $pattern -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item -Recurse -Force $_.FullName }
+}
+$junkFiles = @('*.md', 'LICENSE', 'LICENSE.txt', 'License.txt', 'AI_USAGE.md')
+foreach ($pattern in $junkFiles) {
+    Get-ChildItem -Path $libsRoot -Recurse -File -Filter $pattern -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item -Force $_.FullName }
+}
+
 # --- Zip it ------------------------------------------------------------------
 # Compress-Archive with -Path pointing at a directory includes the
 # directory itself as the zip's top entry — exactly what CurseForge wants.

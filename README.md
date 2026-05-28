@@ -4,7 +4,7 @@ A small WoW retail addon that lets a 5-man dungeon group **see each other's majo
 
 How it works in one line: each client broadcasts when it casts a tracked spell over a hidden addon-message channel; receivers render that as an icon with a cooldown swipe on the sender's party frame.
 
-Status: **v0.6.1** — first live-tested build. Communication confirmed working between clients.
+Status: **v0.7.0** — UI refactor: Settings panel now built on **NoobTaco-Config**, anchor uses **FerrozEditModeLib** for native Edit Mode integration. Requires re-testing after the lib swap.
 
 ---
 
@@ -109,7 +109,7 @@ When no matching frame is visible (typical for ElvUI / Grid2 / Vuhdo / Cell user
 
 Icons: bright when ready, desaturated + clockwise swipe + countdown text when on cooldown. Spell tooltip on hover.
 
-**Sizing & positioning** are tunable in the Settings panel's "Display" column:
+**Sizing & positioning** live in **Edit Mode** — press Esc → Edit Mode and click the DzakSharedCDs anchor. The same 5 controls are exposed as a plugin panel via `FerrozEditModeLib`'s `GetOrCreateFrameSpecificControls` hook:
 
 | Setting          | Default  | Range    | Effect                                                              |
 | ---------------- | -------- | -------- | ------------------------------------------------------------------- |
@@ -119,7 +119,7 @@ Icons: bright when ready, desaturated + clockwise swipe + countdown text when on
 | Offset X         | 6 px     | -100–100 | Horizontal nudge between the frame edge and the row.                |
 | Offset Y         | 0 px     | -100–100 | Vertical nudge.                                                     |
 
-All changes apply immediately — sliders trigger `Display:UpdateAll` on every step. Persisted to `DzakSharedCDsDB.display`.
+Edit Mode also gives free scale and opacity controls for the anchor itself (via Ferroz's built-in standard controls). All settings persist to `DzakSharedCDsDB.display` / `DzakSharedCDsDB.anchor.layouts.<layoutName>`.
 
 ---
 
@@ -139,10 +139,12 @@ DzakSharedCDs/
   Display.lua             ← per-unit icon row attached to party frame
   Main.lua                ← DB seeding, ns.* helpers, event hookup, /dscd slash command
   Settings.lua            ← Blizzard Settings canvas: spec dropdown + per-spec spell list
+  build.ps1               ← packaging script (CurseForge-shaped zip)
   Libs/
     LibStub/
-    LibEditMode/
     LibSpecialization/
+    FerrozEditModeLib/    ← native Edit Mode integration (replaces LibEditMode)
+    NoobTaco-Config/      ← schema-driven Settings UI engine
 ```
 
 Load order matters (declared in the TOC, top → bottom):
@@ -190,6 +192,15 @@ DzakSharedCDsDB = {
         offsetX       = 6,
         offsetY       = 0,
     },
+    anchor = {
+        layouts = {
+            Modern = { point = "CENTER", relativeFrame = UIParent,
+                       relativePoint = "CENTER", xOfs = 0, yOfs = 0,
+                       scale = 1.0, opacity = 1.0,
+                       height = 28, width = 200 },
+            -- (one entry per Edit Mode layout the user has touched)
+        },
+    },
     trackedSpellsBySpec = {
         [65]  = { [642] = true, [498] = true, ... },     -- Holy Paladin
         [256] = { [33206] = true, [62618] = true, ... }, -- Disc Priest
@@ -205,7 +216,9 @@ DzakSharedCDsDB = {
 
 Per-spec lists are seeded **lazily** from `ns.DEFAULT_SPELLS_BY_SPEC[specId]` the first time a spec is observed (locally or via a party member's LibSpecialization broadcast). After that, edits persist; explicitly emptying a spec's list will not re-seed.
 
-Migration: v0.2.0+ dropped the old flat `trackedSpells` set from v0.1.0 unconditionally (the migration target was ambiguous).
+Migration:
+- v0.2.0+ dropped the old flat `trackedSpells` set from v0.1.0 unconditionally (the migration target was ambiguous).
+- v0.7.0 ports `DzakSharedCDsDB.anchor = { point, x, y, enabled }` to FerrozEditModeLib's `{ layouts = { Modern = {...} } }` shape on first load. Legacy keys are cleared after porting.
 
 ---
 
@@ -216,7 +229,8 @@ Migration: v0.2.0+ dropped the old flat `trackedSpells` set from v0.1.0 uncondit
 - Slash: `/dscddebug [on|off]`.
 
 ### `Anchor.lua`
-- `ns.anchorFrame` — `FRAME` registered with LibEditMode, draggable in Edit Mode, position persisted to `DzakSharedCDsDB.anchor`. Used as the fallback when a unit's Blizzard party frame can't be resolved.
+- `ns.anchorFrame` — `FRAME` registered with **FerrozEditModeLib** (mixes in `EditModeSystemMixin` so the anchor appears alongside native Edit Mode systems). Position / scale / opacity persisted per Edit Mode layout in `DzakSharedCDsDB.anchor.layouts`. Used as the fallback when a unit's Blizzard party frame can't be resolved.
+- `anchor:GetOrCreateFrameSpecificControls(socket)` — Ferroz calls this when the user opens its config popup for our frame; we return a plugin panel hosting the 5 display sliders (icon size / spacing / grow / offsetX / offsetY) and a "Reset display defaults" button.
 
 ### `ClassDefaults.lua`
 - `ns.DEFAULT_SPELLS_BY_SPEC[specId] = { [spellId] = true, ... }` — ~265 spell IDs across all 39 retail specs, defensives / offensives / healer CDs only (≥45s cooldowns). Verified against Wowhead / Warcraft Wiki for Midnight 12.0.x.
@@ -264,7 +278,7 @@ Internally wraps `LibSpecialization.RegisterGroup`.
 - Slash: `/dscd`, `/dscd status`, `/dscd init`, `/dscd broadcast`, `/dscd ping`.
 
 ### `Settings.lua`
-- Blizzard Settings canvas. Left column: master Enable checkbox + spec dropdown (grouped by class) + per-spec spell list. Each row has the icon, ID + name, a small **CD override** EditBox (blank = use API, number = force seconds), and an X to remove. Right column: Display settings (icon size, spacing, grow direction, X/Y offset, Reset display defaults). Bottom: slash command reference.
+- Blizzard Settings canvas hosting a **NoobTaco-Config** two-column layout. Sidebar buttons: **General** (master Enable + slash commands), **Spells** (spec dropdown + per-spec list with override editbox + remove), **About** (version + credits). General / About sections use NoobTaco-Config's schema renderer; the Spells section is built imperatively because the schema doesn't model dynamic per-row composite widgets.
 - `ns.OpenSettings()` opens the panel programmatically.
 
 ---
@@ -273,7 +287,7 @@ Internally wraps `LibSpecialization.RegisterGroup`.
 
 1. **Cooldown durations are base values, not runtime-modified.** For the local player we cache `C_Spell.GetSpellBaseCooldown(spellId)` at the moment we build the advertised set (using `GetSpellCooldown` at `UNIT_SPELLCAST_SUCCEEDED` time races the engine — it returns 0 or just the GCD). For remote players we look up the same base cooldown on the *receiver's* client. Either way, talent-based CDR (Glimmer-style reductions, etc.) is not reflected. **Workaround**: each row in the Settings spell list has a small "CD override" field — type the correct duration in seconds and it'll win over the API on both the send and receive paths. Leave it blank to use the API value. Stored globally per spell ID in `DzakSharedCDsDB.cooldownOverrides`.
 
-2. **No third-party UI support yet.** Rows attach to default Blizzard frames only (`CompactPartyFrameMemberN`, `PartyFrame.MemberFrameN`, `CompactRaidFrameN`). ElvUI / Grid2 / Vuhdo / Cell / NDui users fall back to the LibEditMode anchor. Adding more is straightforward — mirror the patterns in MiniCC's `Core/Frames.lua`.
+2. **No third-party UI support yet.** Rows attach to default Blizzard frames only (`CompactPartyFrameMemberN`, `PartyFrame.MemberFrameN`, `CompactRaidFrameN`). ElvUI / Grid2 / Vuhdo / Cell / NDui users fall back to the FerrozEditModeLib-managed anchor. Adding more is straightforward — mirror the patterns in MiniCC's `Core/Frames.lua`.
 
 3. **Spec discovery requires LibSpecialization on the party member's side.** Standalone but most addons ship it. Without it, their row stays hidden because we don't know their spec.
 
