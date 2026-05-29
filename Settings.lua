@@ -163,9 +163,12 @@ local function FlatSpecOptions()
 	return out
 end
 
-local function MakeSpellRow(parent, rowWidth)
+local function MakeSpellRow(parent)
 	local row = CreateFrame("Frame", nil, parent)
-	row:SetSize(rowWidth - 24, ROW_HEIGHT)
+	-- Row height is fixed; width is set via two anchors (LEFT+RIGHT)
+	-- in RebuildList so it auto-tracks the listChild's width even if
+	-- the ScrollFrame's width changes later.
+	row:SetHeight(ROW_HEIGHT)
 
 	row.icon = row:CreateTexture(nil, "ARTWORK")
 	row.icon:SetSize(20, 20)
@@ -322,11 +325,16 @@ local function BuildSpellsSection(content)
 		for i, id in ipairs(sorted) do
 			local row = rowPool[i]
 			if not row then
-				row = MakeSpellRow(listChild, listChild:GetWidth())
+				row = MakeSpellRow(listChild)
 				rowPool[i] = row
 			end
+			-- Two anchors -> row width tracks listChild regardless of
+			-- whether the scroll's layout pass has resolved when the row
+			-- is first shown.
+			local yOff = -(i - 1) * (ROW_HEIGHT + ROW_GAP)
 			row:ClearAllPoints()
-			row:SetPoint("TOPLEFT", 0, -(i - 1) * (ROW_HEIGHT + ROW_GAP))
+			row:SetPoint("TOPLEFT", listChild, "TOPLEFT", 0, yOff)
+			row:SetPoint("TOPRIGHT", listChild, "TOPRIGHT", 0, yOff)
 			row:Show()
 
 			local text, iconID = FormatLine(id)
@@ -407,7 +415,25 @@ end
 
 sectionRenderers.spells = function(content)
 	if Renderer and layoutContainer then
+		-- Releases schema-managed frames AND resets ContentChild to 1x1.
 		Renderer:Clear(layoutContainer)
+	end
+	-- Re-grow ContentChild before we attach widgets to it. NoobTaco's
+	-- Render() does the same dance at its top — without it, our section's
+	-- TOPLEFT/TOPRIGHT anchors collapse to a 1-px-wide region inside the
+	-- content ScrollFrame's viewport and almost nothing is visible.
+	if layoutContainer and layoutContainer.Content then
+		layoutContainer:GetRect()
+		layoutContainer.Content:GetRect()
+		local width = layoutContainer.Content:GetWidth()
+		if width < 200 then
+			local parentWidth = layoutContainer:GetWidth()
+			width = (parentWidth > 200) and (parentWidth - 250) or 550
+		end
+		-- Section content stack (header + dropdown + buttons + 360 scroll
+		-- + padding) tops out around 500 px. Pick something generous so
+		-- the NoobTaco scroll's range covers the whole spell list.
+		content:SetSize(width, 520)
 	end
 	BuildSpellsSection(content)
 end

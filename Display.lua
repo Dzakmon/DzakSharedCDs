@@ -143,10 +143,10 @@ local function AnchorRowToUnit(row, unit, cfg)
 		attachRow(frame, cfg.offsetX, cfg.offsetY)
 		row:Show()
 	else
-		-- Fallback: attach to the LibEditMode anchor. Same semantics as
-		-- the party-frame branch so the Edit Mode preview matches in-game.
-		-- Multiple fallback rows stack downward via stackY so they don't
-		-- pile on top of each other.
+		-- Fallback: attach to the FerrozEditModeLib-managed anchor. Same
+		-- semantics as the party-frame branch so the Edit Mode preview
+		-- matches in-game. Multiple fallback rows stack downward via
+		-- stackY so they don't pile on top of each other.
 		local anchor = ns.anchorFrame
 		if not anchor then row:Hide(); return end
 		row:SetParent(anchor)

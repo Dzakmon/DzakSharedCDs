@@ -32,10 +32,15 @@ anchor:SetBackdrop({
 anchor:SetBackdropColor(0, 0, 0, 0.15)
 anchor:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.4)
 
+-- Identification text. Hidden outside Edit Mode so it doesn't sit on
+-- top of fallback-rendered icon rows (Display.lua attaches rows INSIDE
+-- the anchor's bounds when no party frame is resolved, which would
+-- otherwise overlap a CENTER-anchored label). Surfaces only when the
+-- user enters Edit Mode and needs to find the frame.
 local anchorLabel = anchor:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
 anchorLabel:SetPoint("CENTER")
 anchorLabel:SetText("DzakSharedCDs")
-anchorLabel:SetAlpha(0.4)
+anchorLabel:SetAlpha(0)
 
 ns.anchorFrame = anchor
 
@@ -49,7 +54,7 @@ local function SetEditModeAppearance(active)
 	else
 		anchor:SetBackdropColor(0, 0, 0, 0.15)
 		anchor:SetBackdropBorderColor(0.4, 0.4, 0.4, 0.4)
-		anchorLabel:SetAlpha(0.4)
+		anchorLabel:SetAlpha(0)
 	end
 end
 
