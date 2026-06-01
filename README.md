@@ -4,7 +4,12 @@ A small WoW retail addon that lets a 5-man dungeon group **see each other's majo
 
 How it works in one line: each client broadcasts when it casts a tracked spell over a hidden addon-message channel; receivers render that as an icon with a cooldown swipe on the sender's party frame.
 
-Status: **v0.10.0** — Default tracked-spell list rebuilt by cross-referencing PetesDefensiveHistory's `AbilityDb` and Blizzi_Interrupts's `SPELL_DEFS`. Net adds: Alter Time (all mage specs), Survival of the Fittest (hunters), Zenith (WW), Dispersion (Shadow), Last Resort (Vengeance), Berserk (Guardian), Takedown (Survival), Ret-specific Divine Protection. Drops 4 unverified entries that neither inspiration source backed.
+Status: **v0.11.0** — Four-piece cleanup:
+
+1. **Defaults trimmed to strict reference-only** (~119 entries, down from ~283). Every entry now traces to PetesDefensiveHistory's `AbilityDb` or Blizzi_Interrupts's `SPELL_DEFS`. Some specs end up thin (Warlocks at 1, Aug Evoker at 1) — users add their own via Settings.
+2. **Anchor side and growth direction split** into independent settings. `anchorSide` picks which edge of the party frame the row attaches to; `growDirection` picks which absolute direction icons fan out from there. Old single `growDirection` value migrates cleanly on load.
+3. **Spells tab rewritten** — dropped the nested ScrollFrame that was fighting NoobTaco's outer scroll. Rows now stack inside the section frame and the outer scroll handles overflow naturally. Anonymous dropdown to avoid global-name collisions on tab re-entry.
+4. **CD override field removed**; senders now broadcast the authoritative post-cast duration on the wire (`D1;USED;<spellID>;<duration>`), so receivers don't need per-spell override storage. Defer the broadcast 0.1s after `UNIT_SPELLCAST_SUCCEEDED` so the engine has committed the real CD (BliZzi interrupt-tracker pattern). Instant local feedback uses `GetSpellBaseCooldown` as the initial guess; the deferred path overwrites with the authoritative value.
 
 ---
 
@@ -58,7 +63,7 @@ All inter-client communication goes through one Blizzard `CHAT_MSG_ADDON` prefix
 | Wire format                          | Meaning                                                                                            |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------- |
 | `D1;INIT;<id1>,<id2>,...`            | "Here's the subset of tracked spells I actually have talented." Sent on ready check + other moments. |
-| `D1;USED;<spellID>`                  | "I just cast spell `<spellID>`." Triggers a cooldown swipe on the receiver's display.              |
+| `D1;USED;<spellID>;<duration>`       | "I just cast spell `<spellID>`; my authoritative post-cast CD is `<duration>` seconds." Receiver uses the duration directly — no local lookup or override needed. Pre-v0.11 clients omitted `<duration>`; receiver falls back to `GetSpellBaseCooldown` then 60s. |
 | `D1;READY;<spellID>`                 | "My cooldown for `<spellID>` finished." Triggers the receiver to clear the swipe.                  |
 | `D1;PING;<timestamp>`                | Transport-layer delivery test from `/dscd ping`. Receivers print a visible chat line.              |
 
@@ -137,8 +142,9 @@ When no provider matches (e.g. mid-roster-shuffle, or a UI addon is temporarily 
 | ------------------------ | ------- | -------------- | ------------------------------------------------------------------- |
 | Icon size                | 24 px   | 12–64          | Width and height of every icon.                                     |
 | Icon spacing             | 2 px    | 0–16           | Gap between icons.                                                  |
-| Grow direction           | Right   | Left / Right   | Which edge of the party frame the row anchors against; icons grow inward from there. |
-| Offset X                 | 6 px    | -100–100       | Horizontal nudge between the frame edge and the row.                |
+| Anchor side              | Right   | Left / Right   | Which edge of the party frame the row attaches to.                  |
+| Grow direction           | Right   | Left / Right   | Absolute direction the icons fan out from the anchor point. Combine with anchor side: `RIGHT + RIGHT` = icons outside frame growing rightward (default); `RIGHT + LEFT` = icons inside frame from right edge; etc. |
+| Offset X                 | 6 px    | -100–100       | Positive pushes the row INTO the frame from the anchored edge; negative pushes it OUTSIDE. |
 | Offset Y                 | 0 px    | -100–100       | Vertical nudge.                                                     |
 | Border thickness         | 1 px    | 0–4            | Outward-drawn border around each icon. `0` disables the border.     |
 | Border color (R/G/B/A)   | Black   | 0.0–1.0 each   | Edit `DzakSharedCDsDB.display.borderColor{R,G,B,A}` manually for now — NoobTaco-Config's color picker is a stub. |
@@ -212,7 +218,8 @@ DzakSharedCDsDB = {
     display = {
         iconSize       = 24,
         iconGap        = 2,
-        growDirection  = "RIGHT",
+        anchorSide     = "RIGHT", -- which edge of the party frame to attach to
+        growDirection  = "RIGHT", -- absolute direction icons fan out
         offsetX        = 6,
         offsetY        = 0,
         borderSize     = 1,       -- outward border thickness (0 disables)
@@ -238,11 +245,6 @@ DzakSharedCDsDB = {
         [256] = { [33206] = true, [62618] = true, ... }, -- Disc Priest
         ...
     },
-    cooldownOverrides = {
-        [642]   = 300,   -- Divine Shield: force 5 min, ignore API
-        [33206] = 360,   -- Pain Suppression: force 6 min
-        -- absent entries fall through to GetSpellBaseCooldown
-    },
 }
 ```
 
@@ -252,6 +254,8 @@ Migration:
 - v0.2.0+ dropped the old flat `trackedSpells` set from v0.1.0 unconditionally (the migration target was ambiguous).
 - v0.7.0 ports `DzakSharedCDsDB.anchor = { point, x, y, enabled }` to FerrozEditModeLib's `{ layouts = { Modern = {...} } }` shape on first load. Legacy keys are cleared after porting.
 - v0.9.0 removed the anchor entirely. The `DzakSharedCDsDB.anchor` key is left in place as a harmless orphan — clean it up with `DzakSharedCDsDB.anchor = nil` if it bothers you.
+- v0.11.0 splits old `display.growDirection` into `display.anchorSide` + `display.growDirection`. Old `growDirection = "LEFT"` maps to `{anchorSide="LEFT", growDirection="RIGHT"}` (icons grew rightward INTO frame from left edge), `"RIGHT"` maps to `{anchorSide="RIGHT", growDirection="LEFT"}`. Both visuals are preserved exactly.
+- v0.11.0 also drops `DzakSharedCDsDB.cooldownOverrides` (CD override field is gone; senders now broadcast authoritative duration).
 
 ---
 
@@ -262,7 +266,7 @@ Migration:
 - Slash: `/dscddebug [on|off]`.
 
 ### `ClassDefaults.lua`
-- `ns.DEFAULT_SPELLS_BY_SPEC[specId] = { [spellId] = true, ... }` — ~283 spell IDs across all 39 retail specs, defensives / offensives / healer CDs only (≥45s cooldowns, with a couple of tracked-everywhere exceptions like Wake of Ashes and Spell Reflection). Cross-referenced against PetesDefensiveHistory's `AbilityDb` and Blizzi_Interrupts's `SPELL_DEFS` for Midnight 12.0.x — the union of what both production addons consider trackable, minus our addon's broadcast-only restrictions (no interrupts / CC / movement / trinkets / racials).
+- `ns.DEFAULT_SPELLS_BY_SPEC[specId] = { [spellId] = true, ... }` — ~119 spell IDs across all 39 retail specs. STRICT reference-only: every entry traces back to PetesDefensiveHistory's `AbilityDb` (flagged `IMPORTANT` / `BIG` / `EXTERNAL` / `RAID`) or Blizzi_Interrupts's `SPELL_DEFS`. Thin specs (Warlocks at 1 entry, Aug Evoker at 1) are intentional — the references genuinely flag few CDs for them; users can add their own via Settings.
 - `ns.ALL_SPECS` — ordered list of `{ specId, classToken, className, specName, role }`.
 - `ns.GetSpecInfo(specId)` / `ns.FormatSpecLabel(specId)` — display helpers.
 
@@ -305,16 +309,15 @@ Internally wraps `LibSpecialization.RegisterGroup`.
 - `ns.ResetSpecToDefaults(specId)` / `ns.AddTracked(specId, spellId)` / `ns.RemoveTracked(specId, spellId)`.
 - `ns.GetDisplaySetting(key)` / `ns.SetDisplaySetting(key, value)` / `ns.ResetDisplayDefaults()` — display config, persisted to `DzakSharedCDsDB.display`; setter triggers `Display:UpdateAll`.
 - Constant: `ns.DEFAULT_DISPLAY` — single source of truth for the display defaults table.
-- `ns.GetCooldownOverride(spellId)` / `ns.SetCooldownOverride(spellId, seconds)` — manual per-spell duration override. Returns nil / passes nil-or-≤0 to clear. Consulted by Tracker on both local cast and remote receive paths.
 - Slash: `/dscd`, `/dscd status`, `/dscd init`, `/dscd broadcast`, `/dscd ping`.
 
 ### `Settings.lua`
 - Standalone movable window hosting a **NoobTaco-Config** two-column layout. Sidebar buttons:
   - **General** — master Enable + slash command reference.
-  - **Display** — icon size / spacing / grow direction / offsets / border thickness / gray-out toggle / minutes toggle / countdown font size. Live preview via `dispOnChange` → `ns.SetDisplaySetting` → `Display:UpdateAll`. Plus a "Reset display defaults" button.
-  - **Spells** — spec dropdown + per-spec list with override editbox + remove.
+  - **Display** — icon size / spacing / anchor side / grow direction / offsets / border thickness / gray-out toggle / minutes toggle / countdown font size. Live preview via `dispOnChange` → `ns.SetDisplaySetting` → `Display:UpdateAll`. Plus a "Reset display defaults" button.
+  - **Spells** — spec dropdown + per-spec list (icon + name + remove). No CD override editbox in v0.11 — sender broadcasts authoritative duration.
   - **About** — version + credits.
-- General / Display / About sections use NoobTaco-Config's schema renderer; the Spells section is built imperatively because the schema doesn't model dynamic per-row composite widgets.
+- General / Display / About sections use NoobTaco-Config's schema renderer; the Spells section is built imperatively because the schema doesn't model dynamic per-row composite widgets. Rows stack directly inside the section frame; NoobTaco's outer ScrollFrame handles overflow (no inner ScrollFrame).
 - `ns.OpenSettings()` toggles the window programmatically (also bound to `/dscd` with no args).
 
 ---
@@ -332,6 +335,8 @@ Internally wraps `LibSpecialization.RegisterGroup`.
 5. **Default-seeding is one-shot per spec.** If a future version adds new defaults to a spec, existing users won't get them automatically (avoids clobbering edits). They can use the "Reset This Spec" button in Settings to opt in.
 
 6. **Sender-side cooldown reset detection is best-effort.** If you cast a tracked spell and a talent / proc later resets its cooldown, the addon will still broadcast `READY` at the originally-scheduled time, leading to a brief misrepresentation on receivers' screens.
+
+7. **100ms broadcast latency.** `OnLocalCast` defers the wire `USED` send by 0.1s so the engine has committed the authoritative post-cast cooldown via `C_Spell.GetSpellCooldown` (at `UNIT_SPELLCAST_SUCCEEDED` time it returns 0 / GCD-only). Receivers see the icon dim ~100–250ms after the sender presses the button (deferred broadcast + network round-trip), which is below the threshold most players notice but visible on slow connections.
 
 ---
 

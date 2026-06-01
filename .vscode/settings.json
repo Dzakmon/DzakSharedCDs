@@ -80,7 +80,9 @@
         "CreateSettingsExpandableSectionInitializer",
         "LE_PARTY_CATEGORY_INSTANCE",
         "UISpecialFrames",
-        "ReloadUI"
+        "ReloadUI",
+        "DevTools_DumpCommand",
+        "CreateColorFromRGBHexString"
     ],
     "Lua.type.weakUnionCheck": true
 }

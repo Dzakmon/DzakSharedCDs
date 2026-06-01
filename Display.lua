@@ -29,6 +29,7 @@ local function GetCfg()
 	return {
 		iconSize       = ns.GetDisplaySetting("iconSize"),
 		iconGap        = ns.GetDisplaySetting("iconGap"),
+		anchorSide     = ns.GetDisplaySetting("anchorSide"),
 		growDirection  = ns.GetDisplaySetting("growDirection"),
 		offsetX        = ns.GetDisplaySetting("offsetX"),
 		offsetY        = ns.GetDisplaySetting("offsetY"),
@@ -238,12 +239,15 @@ local function AnchorRowToUnit(row, unit, cfg)
 	row:SetFrameStrata(frame:GetFrameStrata())
 	row:SetFrameLevel(frame:GetFrameLevel() + 5)
 
-	-- Grow direction = which edge of the party frame the row's matching
-	-- edge sits against. Icons then extend INWARD across the frame's
-	-- interior. LEFT: row's left aligns to the frame's left, icons grow
-	-- rightward into the frame. RIGHT: mirror. Use a negative offsetX
-	-- to push the row outside the frame entirely.
-	if cfg.growDirection == "LEFT" then
+	-- anchorSide: which edge of the party frame the row attaches to.
+	-- offsetX > 0 always pushes the row INTO the frame from the anchored
+	-- edge; negative offsetX pushes it OUTSIDE. The four useful combos
+	-- (anchorSide × growDirection) lay out as:
+	--   anchorSide=RIGHT, grow=RIGHT  → icons OUTSIDE frame, growing rightward (default)
+	--   anchorSide=RIGHT, grow=LEFT   → icons INSIDE frame from right edge
+	--   anchorSide=LEFT,  grow=LEFT   → icons OUTSIDE frame, growing leftward
+	--   anchorSide=LEFT,  grow=RIGHT  → icons INSIDE frame from left edge
+	if cfg.anchorSide == "LEFT" then
 		row:SetPoint("LEFT", frame, "LEFT", cfg.offsetX, cfg.offsetY)
 	else
 		row:SetPoint("RIGHT", frame, "RIGHT", -cfg.offsetX, cfg.offsetY)
@@ -311,7 +315,11 @@ local function RenderRow(unit)
 		icon.spellId = spellId
 		icon:SetSize(cfg.iconSize, cfg.iconSize)
 		icon:ClearAllPoints()
-		if cfg.growDirection == "LEFT" then
+		-- growDirection is now ABSOLUTE: RIGHT means each subsequent icon
+		-- sits to the right of the previous one (anchored from row's LEFT
+		-- edge); LEFT means each subsequent icon sits to the left
+		-- (anchored from row's RIGHT edge). Independent of anchorSide.
+		if cfg.growDirection == "RIGHT" then
 			icon:SetPoint("LEFT", row, "LEFT", x, 0)
 		else
 			icon:SetPoint("RIGHT", row, "RIGHT", -x, 0)

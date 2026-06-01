@@ -10,10 +10,19 @@ local addonName, ns = ...
 
 -- Defaults for the global display block. Single source of truth: both
 -- the seeder below and Settings.lua's "Reset to defaults" path read it.
+--
+-- v0.11.0 split the old `growDirection` (which mixed "which frame edge
+-- to attach to" with "which way icons grow"). The two are now
+-- independent:
+--   anchorSide     — which edge of the party frame the row attaches to
+--   growDirection  — absolute direction the icons fan out from there
+-- So e.g. anchorSide=RIGHT + growDirection=RIGHT puts icons OUTSIDE
+-- the frame, growing rightward away from it.
 ns.DEFAULT_DISPLAY = {
 	iconSize       = 24,
 	iconGap        = 2,
-	growDirection  = "RIGHT", -- "LEFT" or "RIGHT"
+	anchorSide     = "RIGHT", -- "LEFT" or "RIGHT" — which edge of the party frame
+	growDirection  = "RIGHT", -- "LEFT" or "RIGHT" — which way icons fan out
 	offsetX        = 6,
 	offsetY        = 0,
 	-- BliZzi-style icon polish.
@@ -38,22 +47,34 @@ local function SeedSchema()
 
 	DzakSharedCDsDB.trackedSpellsBySpec = DzakSharedCDsDB.trackedSpellsBySpec or {}
 
-	-- v0.5.0: per-key backfill so new defaults land in existing saves
-	-- without clobbering user-tuned values. Using `if nil then` (not
-	-- `or`) so an intentional zero or false isn't overwritten.
 	DzakSharedCDsDB.display = DzakSharedCDsDB.display or {}
+
+	-- v0.11.0: split growDirection into anchorSide + growDirection. Migrate
+	-- old saves so existing visual stays the same. Old growDirection had two
+	-- valid values; each picks the matching {anchorSide, new growDirection}
+	-- pair that produces the same visual (icons growing INTO the frame from
+	-- the anchored edge):
+	--   old "LEFT"  → row anchored to frame's LEFT, icons grow RIGHT
+	--   old "RIGHT" → row anchored to frame's RIGHT, icons grow LEFT
+	if DzakSharedCDsDB.display.anchorSide == nil and DzakSharedCDsDB.display.growDirection then
+		local oldGrow = DzakSharedCDsDB.display.growDirection
+		DzakSharedCDsDB.display.anchorSide = oldGrow
+		DzakSharedCDsDB.display.growDirection = (oldGrow == "LEFT") and "RIGHT" or "LEFT"
+	end
+
+	-- Per-key backfill so new defaults land in existing saves without
+	-- clobbering user-tuned values. Using `if nil then` (not `or`) so an
+	-- intentional zero or false isn't overwritten.
 	for k, v in pairs(ns.DEFAULT_DISPLAY) do
 		if DzakSharedCDsDB.display[k] == nil then
 			DzakSharedCDsDB.display[k] = v
 		end
 	end
 
-	-- v0.6.0: manual cooldown overrides. Keyed by spellId (global, not
-	-- per-spec) because the same spell's "true" cooldown is almost
-	-- always the same across specs; talent-CDR is the exception that
-	-- the override is meant to handle in the first place. Value is the
-	-- duration in seconds; absence of an entry = use API lookup.
-	DzakSharedCDsDB.cooldownOverrides = DzakSharedCDsDB.cooldownOverrides or {}
+	-- v0.11.0: cooldownOverrides removed. The sender now broadcasts the
+	-- authoritative post-cast CD as part of USED, so receivers don't
+	-- need per-spell overrides. Drop the key if present.
+	DzakSharedCDsDB.cooldownOverrides = nil
 end
 SeedSchema()
 
@@ -138,28 +159,6 @@ function ns.ResetDisplayDefaults()
 		DzakSharedCDsDB.display[k] = v
 	end
 	if ns.Display then ns.Display:UpdateAll() end
-end
-
--- Manual cooldown overrides. Returning nil means "use API lookup".
--- Tracker consults this first on both the local-cast path and the
--- remote USED handler, so a fix shows up identically on every client
--- that has the same override configured.
-function ns.GetCooldownOverride(spellId)
-	if not spellId then return nil end
-	return DzakSharedCDsDB.cooldownOverrides[spellId]
-end
-
-function ns.SetCooldownOverride(spellId, seconds)
-	if not spellId then return end
-	-- Treat 0 / nil / negative as "clear the override" so the UI's
-	-- "blank field" path lands here too.
-	if not seconds or seconds <= 0 then
-		DzakSharedCDsDB.cooldownOverrides[spellId] = nil
-		ns.Debug:print("settings", "cleared CD override for", spellId)
-	else
-		DzakSharedCDsDB.cooldownOverrides[spellId] = seconds
-		ns.Debug:print("settings", "set CD override", spellId, "=", seconds)
-	end
 end
 
 -- ============================================================

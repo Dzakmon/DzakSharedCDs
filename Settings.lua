@@ -148,18 +148,31 @@ local function DisplaySchema()
 			  min = 0, max = 16, step = 1,
 			  default = ns.DEFAULT_DISPLAY.iconGap,
 			  onChange = dispOnChange("iconGap") },
+			-- anchorSide picks which edge of the party frame the row
+			-- attaches to. growDirection picks which way icons grow
+			-- from there. Combining them gives all four outside/inside
+			-- × left/right layouts.
+			{ type = "dropdown",
+			  id = "DzakSharedCDsDB.display.anchorSide",
+			  label = "Anchor side",
+			  default = ns.DEFAULT_DISPLAY.anchorSide,
+			  options = {
+				{ value = "RIGHT", label = "Right edge of party frame" },
+				{ value = "LEFT",  label = "Left edge of party frame" },
+			  },
+			  onChange = dispOnChange("anchorSide") },
 			{ type = "dropdown",
 			  id = "DzakSharedCDsDB.display.growDirection",
 			  label = "Grow direction",
 			  default = ns.DEFAULT_DISPLAY.growDirection,
 			  options = {
-				{ value = "RIGHT", label = "Right (icons grow leftward from frame's right edge)" },
-				{ value = "LEFT",  label = "Left (icons grow rightward from frame's left edge)" },
+				{ value = "RIGHT", label = "Right (icons fan out rightward)" },
+				{ value = "LEFT",  label = "Left (icons fan out leftward)" },
 			  },
 			  onChange = dispOnChange("growDirection") },
 			{ type = "slider",
 			  id = "DzakSharedCDsDB.display.offsetX",
-			  label = "Offset X",
+			  label = "Offset X (positive = into frame)",
 			  min = -100, max = 100, step = 1,
 			  default = ns.DEFAULT_DISPLAY.offsetX,
 			  onChange = dispOnChange("offsetX") },
@@ -251,67 +264,48 @@ local function FlatSpecOptions()
 	return out
 end
 
+-- Row layout post-v0.11: just icon + label + remove button. The CD
+-- override editbox is gone — senders now broadcast the authoritative
+-- post-cast duration on the wire (Tracker.OnLocalCast / Chat USED
+-- format), so receivers don't need a per-spell override mechanism.
+-- The row anchors LEFT+RIGHT to its parent in RebuildList so width
+-- auto-tracks the list frame even if Blizzard's layout hasn't passed.
 local function MakeSpellRow(parent)
 	local row = CreateFrame("Frame", nil, parent)
-	-- Row height is fixed; width is set via two anchors (LEFT+RIGHT)
-	-- in RebuildList so it auto-tracks the listChild's width even if
-	-- the ScrollFrame's width changes later.
 	row:SetHeight(ROW_HEIGHT)
 
 	row.icon = row:CreateTexture(nil, "ARTWORK")
 	row.icon:SetSize(20, 20)
-	row.icon:SetPoint("LEFT", 4, 0)
+	row.icon:SetPoint("LEFT", row, "LEFT", 4, 0)
 	row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
 	row.remove = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
 	row.remove:SetSize(28, 22)
-	row.remove:SetPoint("RIGHT", -2, 0)
+	row.remove:SetPoint("RIGHT", row, "RIGHT", -4, 0)
 	row.remove:SetText("X")
-
-	row.cdInput = CreateFrame("EditBox", nil, row, "InputBoxTemplate")
-	row.cdInput:SetSize(40, 18)
-	row.cdInput:SetPoint("RIGHT", row.remove, "LEFT", -8, 0)
-	row.cdInput:SetAutoFocus(false)
-	row.cdInput:SetNumeric(true)
-	row.cdInput:SetMaxLetters(4)
-	row.cdInput:SetTextInsets(4, 4, 0, 0)
-	row.cdInput:SetFontObject("GameFontHighlight")
-	row.cdInput:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
-	row.cdInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-
-	row.cdInput:SetScript("OnEnter", function(self)
-		if not self.spellId then return end
-		local override = ns.GetCooldownOverride(self.spellId)
-		local apiMs = C_Spell.GetSpellBaseCooldown and C_Spell.GetSpellBaseCooldown(self.spellId)
-		local apiSecs = apiMs and apiMs >= 1000 and (apiMs / 1000) or nil
-		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-		GameTooltip:SetText("Cooldown override (sec)", 1, 1, 1, 1)
-		GameTooltip:AddLine("Blank = use API value.", 0.7, 0.7, 0.7, true)
-		if apiSecs then
-			GameTooltip:AddLine(string.format("|cffaaaaaaAPI reports:|r %.0fs", apiSecs))
-		else
-			GameTooltip:AddLine("|cffaaaaaaAPI reports:|r (none)")
-		end
-		if override then
-			GameTooltip:AddLine(string.format("|cff66ff66Active override:|r %ds", override))
-		end
-		GameTooltip:Show()
-	end)
-	row.cdInput:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 	row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
 	row.label:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
-	row.label:SetPoint("RIGHT", row.cdInput, "LEFT", -6, 0)
+	row.label:SetPoint("RIGHT", row.remove, "LEFT", -6, 0)
 	row.label:SetJustifyH("LEFT")
 	row.label:SetWordWrap(false)
 
 	return row
 end
 
+-- v0.11.0 rewrite. Key change: drop the inner UIPanelScrollFrame entirely
+-- and let rows stack directly inside `section`. The previous nested-scroll
+-- layout was fragile — the inner scroll's `GetWidth() - 20` returned 0 at
+-- build time (its anchors hadn't resolved yet inside a 1-pixel section),
+-- so listChild ended up with negative width and rows rendered invisibly.
+-- Now: `section` grows as rows are added, and NoobTaco-Config's outer
+-- ScrollFrame (its `Content` ScrollFrame around `ContentChild`) handles
+-- overflow. We tell it about our total height by setting content's size
+-- at the end of RebuildList.
 local function BuildSpellsSection(content)
-	-- Clean slate inside the content area. The renderer's ReleaseChildren
-	-- only clears schema-managed frames; ours are orphaned plain Frames
-	-- so we wipe them by name-prefixed lookup.
+	-- Tear down any prior spells section so re-entering the tab gets a
+	-- fresh tree (the schema-managed frames are released by the caller
+	-- before we run; we only need to clean OUR `_dscdSpellsSection`).
 	for _, child in ipairs({ content:GetChildren() }) do
 		if child._dscdSpellsSection then
 			child:Hide()
@@ -321,21 +315,24 @@ local function BuildSpellsSection(content)
 
 	local section = CreateFrame("Frame", nil, content)
 	section._dscdSpellsSection = true
-	section:SetPoint("TOPLEFT", content, "TOPLEFT", LIST_INSET, -LIST_INSET)
+	section:SetPoint("TOPLEFT",  content, "TOPLEFT",  LIST_INSET, -LIST_INSET)
 	section:SetPoint("TOPRIGHT", content, "TOPRIGHT", -LIST_INSET, -LIST_INSET)
-	section:SetHeight(1) -- grows as content expands
+	-- Section's height is set in RebuildList once we know the row count.
 
-	-- Section header.
+	-- ── Section header ─────────────────────────────────────────────────
 	local header = section:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	header:SetPoint("TOPLEFT", section, "TOPLEFT", 0, 0)
 	header:SetText("Tracked spells")
 
-	-- Spec dropdown (flat list).
+	-- ── Spec dropdown (flat list) ──────────────────────────────────────
 	local specLabel = section:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-	specLabel:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -8)
+	specLabel:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -10)
 	specLabel:SetText("Spec:")
 
-	local specDropdown = CreateFrame("Frame", "DzakSharedCDsSpecDropdown", section, "UIDropDownMenuTemplate")
+	-- Anonymous dropdown to avoid the global-name collision on re-entry
+	-- (the previous "DzakSharedCDsSpecDropdown" was registered on every
+	-- BuildSpellsSection call, with the old frame leaking into _G).
+	local specDropdown = CreateFrame("Frame", nil, section, "UIDropDownMenuTemplate")
 	specDropdown:SetPoint("LEFT", specLabel, "RIGHT", -8, -2)
 
 	local RebuildList -- forward decl
@@ -350,19 +347,19 @@ local function BuildSpellsSection(content)
 	UIDropDownMenu_Initialize(specDropdown, function()
 		for _, opt in ipairs(FlatSpecOptions()) do
 			local info = UIDropDownMenu_CreateInfo()
-			info.text = opt.label
-			info.value = opt.value
+			info.text    = opt.label
+			info.value   = opt.value
 			info.checked = (opt.value == currentSpecId)
-			info.func = function() OnSpecSelected(opt.value) end
+			info.func    = function() OnSpecSelected(opt.value) end
 			UIDropDownMenu_AddButton(info)
 		end
 	end)
 	UIDropDownMenu_SetWidth(specDropdown, 220)
 
-	-- Add input + buttons row.
+	-- ── Add input + buttons ────────────────────────────────────────────
 	local idInput = CreateFrame("EditBox", nil, section, "InputBoxTemplate")
 	idInput:SetSize(120, 22)
-	idInput:SetPoint("TOPLEFT", specDropdown, "BOTTOMLEFT", 16, -10)
+	idInput:SetPoint("TOPLEFT", specLabel, "BOTTOMLEFT", 16, -22)
 	idInput:SetAutoFocus(false)
 	idInput:SetNumeric(true)
 	idInput:SetMaxLetters(8)
@@ -382,26 +379,34 @@ local function BuildSpellsSection(content)
 	resetBtn:SetPoint("LEFT", addBtn, "RIGHT", 8, 0)
 	resetBtn:SetText("Reset This Spec")
 
-	-- Scroll for the row list.
-	local scroll = CreateFrame("ScrollFrame", nil, section, "UIPanelScrollFrameTemplate")
-	scroll:SetPoint("TOPLEFT", idInput, "BOTTOMLEFT", -8, -10)
-	scroll:SetPoint("TOPRIGHT", section, "TOPRIGHT", -28, 0) -- room for scrollbar
-	scroll:SetHeight(360)
+	-- ── Row list container ─────────────────────────────────────────────
+	-- Plain Frame (no ScrollFrame). Rows attach to its TOPLEFT/TOPRIGHT
+	-- so width tracks the list. Height grows with row count.
+	local listFrame = CreateFrame("Frame", nil, section)
+	listFrame:SetPoint("TOPLEFT",  idInput, "BOTTOMLEFT", -8, -12)
+	listFrame:SetPoint("TOPRIGHT", section, "TOPRIGHT", 0, 0)
+	listFrame:SetHeight(1)
 
-	local listBg = scroll:CreateTexture(nil, "BACKGROUND")
+	local listBg = listFrame:CreateTexture(nil, "BACKGROUND")
 	listBg:SetAllPoints()
 	listBg:SetColorTexture(0, 0, 0, 0.3)
 
-	local listChild = CreateFrame("Frame", nil, scroll)
-	listChild:SetSize(scroll:GetWidth() - 20, 1)
-	scroll:SetScrollChild(listChild)
+	-- Height of all the chrome (header + dropdown + add-input row +
+	-- listFrame gap). Used to size `content` at the bottom of RebuildList.
+	local CHROME_HEIGHT = 24  -- header
+	                  + 10  -- gap
+	                  + 22  -- dropdown
+	                  + 24  -- idInput row
+	                  + 12  -- gap
+	                  + LIST_INSET * 2
 
 	local rowPool = {}
 
 	RebuildList = function()
 		for _, r in ipairs(rowPool) do r:Hide() end
 		if not currentSpecId then
-			listChild:SetHeight(1)
+			listFrame:SetHeight(1)
+			content:SetSize(content:GetWidth(), CHROME_HEIGHT + 1)
 			return
 		end
 
@@ -413,42 +418,35 @@ local function BuildSpellsSection(content)
 		for i, id in ipairs(sorted) do
 			local row = rowPool[i]
 			if not row then
-				row = MakeSpellRow(listChild)
+				row = MakeSpellRow(listFrame)
 				rowPool[i] = row
 			end
-			-- Two anchors -> row width tracks listChild regardless of
-			-- whether the scroll's layout pass has resolved when the row
-			-- is first shown.
-			local yOff = -(i - 1) * (ROW_HEIGHT + ROW_GAP)
+			local yOff = -(i - 1) * (ROW_HEIGHT + ROW_GAP) - 2
 			row:ClearAllPoints()
-			row:SetPoint("TOPLEFT", listChild, "TOPLEFT", 0, yOff)
-			row:SetPoint("TOPRIGHT", listChild, "TOPRIGHT", 0, yOff)
+			row:SetPoint("TOPLEFT",  listFrame, "TOPLEFT",  4, yOff)
+			row:SetPoint("TOPRIGHT", listFrame, "TOPRIGHT", -4, yOff)
 			row:Show()
 
 			local text, iconID = FormatLine(id)
 			row.icon:SetTexture(iconID)
 			row.label:SetText(text)
+
 			local specForCallback = currentSpecId
 			row.remove:SetScript("OnClick", function()
 				ns.RemoveTracked(specForCallback, id)
 				RebuildList()
 			end)
-
-			row.cdInput.spellId = id
-			local override = ns.GetCooldownOverride(id)
-			row.cdInput:SetText(override and tostring(override) or "")
-			row.cdInput:SetScript("OnEditFocusLost", function(self)
-				local n = tonumber(self:GetText() or "")
-				ns.SetCooldownOverride(id, n)
-				local saved = ns.GetCooldownOverride(id)
-				self:SetText(saved and tostring(saved) or "")
-			end)
 		end
 
-		listChild:SetHeight(math.max(1, #sorted * (ROW_HEIGHT + ROW_GAP)))
+		local listHeight = math.max(4, #sorted * (ROW_HEIGHT + ROW_GAP) + 4)
+		listFrame:SetHeight(listHeight)
+
+		-- Grow NoobTaco-Config's ContentChild so the outer ScrollFrame's
+		-- range covers our whole section. content's width is preserved.
+		content:SetSize(content:GetWidth(), CHROME_HEIGHT + listHeight)
 	end
 
-	-- Add/Reset handlers.
+	-- ── Handlers ───────────────────────────────────────────────────────
 	local function AddFromInput()
 		if not currentSpecId then
 			print("|cffff5555DzakSharedCDs:|r pick a spec first")
@@ -475,7 +473,7 @@ local function BuildSpellsSection(content)
 		RebuildList()
 	end)
 
-	-- Initial selection: local player's spec if known, else first.
+	-- ── Initial selection ─────────────────────────────────────────────
 	if not currentSpecId then
 		currentSpecId = ns.SpecCache:GetLocalSpec() or ns.ALL_SPECS[1].specId
 	end
@@ -506,10 +504,9 @@ sectionRenderers.spells = function(content)
 		-- Releases schema-managed frames AND resets ContentChild to 1x1.
 		Renderer:Clear(layoutContainer)
 	end
-	-- Re-grow ContentChild before we attach widgets to it. NoobTaco's
-	-- Render() does the same dance at its top — without it, our section's
-	-- TOPLEFT/TOPRIGHT anchors collapse to a 1-px-wide region inside the
-	-- content ScrollFrame's viewport and almost nothing is visible.
+	-- Resolve content's WIDTH now so BuildSpellsSection's anchors land in
+	-- a non-1px region. Its RebuildList will set the HEIGHT dynamically
+	-- once it knows the row count (replaces the old fixed-520 estimate).
 	if layoutContainer and layoutContainer.Content then
 		layoutContainer:GetRect()
 		layoutContainer.Content:GetRect()
@@ -518,10 +515,7 @@ sectionRenderers.spells = function(content)
 			local parentWidth = layoutContainer:GetWidth()
 			width = (parentWidth > 200) and (parentWidth - 250) or 550
 		end
-		-- Section content stack (header + dropdown + buttons + 360 scroll
-		-- + padding) tops out around 500 px. Pick something generous so
-		-- the NoobTaco scroll's range covers the whole spell list.
-		content:SetSize(width, 520)
+		content:SetSize(width, 1)
 	end
 	BuildSpellsSection(content)
 end

@@ -2,7 +2,7 @@
 ## Title: DzakSharedCDs
 ## Notes: Broadcasts your tracked spell cooldowns to addon-using party members and shows theirs back, via a hidden addon-message channel.
 ## Author: Dzak
-## Version: 0.10.0
+## Version: 0.11.0
 ## SavedVariables: DzakSharedCDsDB
 ## IconTexture: Interface\Icons\Spell_Holy_BorrowedTime
 

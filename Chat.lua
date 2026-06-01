@@ -224,14 +224,14 @@ frame:SetScript("OnEvent", function(_, _, prefix, text, channel, sender)
 	if not receiveHandler then return end
 
 	if ns.Debug then
-		local firstArg = args[1] or ""
-		local logArg = #firstArg > 80 and (firstArg:sub(1, 80) .. "...") or firstArg
+		local joined = table.concat(args, ";")
+		local logArg = #joined > 80 and (joined:sub(1, 80) .. "...") or joined
 		ns.Debug:print("chat-recv", channel, normalized, verb, logArg)
 	end
-	-- Tracker still expects (sender, verb, payload) — pass args[1] for
-	-- single-arg verbs (USED/READY/INIT). When we add multi-arg verbs,
-	-- Tracker's signature can extend to accept the full args table.
-	receiveHandler(normalized, verb, args[1] or "")
+	-- Pass the full args table — Tracker reads args[1] for spellId,
+	-- args[2] for duration (USED only), etc. Single-arg verbs (READY,
+	-- INIT) ignore args[2+].
+	receiveHandler(normalized, verb, args)
 end)
 
 -- Prefix registration is the gate for receiving CHAT_MSG_ADDON; without

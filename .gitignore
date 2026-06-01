@@ -7,9 +7,5 @@ dist/
 # Reference addons we keep alongside the source for research only
 # (commented out: if you DO want to track these, leave the rest of
 # this file as-is and remove these lines)
-# MiniCC/
-# LuraMemorySync/
-# LuraMemorySync1/
-# TerribleLuraHelper/
 PetesDefensiveHistory
 BliZzi_Interrupts

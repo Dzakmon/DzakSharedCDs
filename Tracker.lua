@@ -141,25 +141,18 @@ local function ResolveSenderUnit(sender)
 	return nil
 end
 
--- C_Spell.GetSpellBaseCooldown returns the spell's base cooldown in
--- milliseconds even when the spell isn't currently on cooldown.
--- C_Spell.GetSpellCooldown can't be used here because at
--- UNIT_SPELLCAST_SUCCEEDED time the engine often hasn't committed the
--- post-cast CD yet — it returns either 0 or just the GCD, so we'd never
--- record a real CD. Falls through to the old global on clients that
--- still expose it.
+-- Best-effort instant CD lookup for the local-cast path.
+-- C_Spell.GetSpellBaseCooldown returns the spell's static base CD in
+-- milliseconds, available even when the spell isn't on cooldown. It
+-- ignores talent CDR — but it's only used for the "instant local row
+-- dim" before the 0.1s-deferred broadcast computes the authoritative
+-- post-cast CD via C_Spell.GetSpellCooldown.
 local QueryBaseCooldownMs = (C_Spell and C_Spell.GetSpellBaseCooldown) or _G.GetSpellBaseCooldown
 
-local function GetCachedBaseCooldown(spellId)
-	local cached = baseCooldownByspell[spellId]
-	if cached then return cached end
+local function GetBaseCooldownSeconds(spellId)
 	if not QueryBaseCooldownMs then return nil end
 	local ms = QueryBaseCooldownMs(spellId)
-	if ms and ms >= 2000 then
-		local secs = ms / 1000
-		baseCooldownByspell[spellId] = secs
-		return secs
-	end
+	if ms and ms >= 2000 then return ms / 1000 end
 	return nil
 end
 
@@ -182,9 +175,6 @@ function Tracker:BuildLocalAdvertisedSet()
 	for spellId in pairs(tracked) do
 		if IsSpellKnownByPlayer(spellId) then
 			set[spellId] = true
-			-- Prime the CD cache while we already know this is a real spell
-			-- the player has. Avoids the first cast missing its swipe.
-			GetCachedBaseCooldown(spellId)
 		end
 	end
 	return set
@@ -258,16 +248,18 @@ local function ScheduleReadyBroadcast(spellId, duration)
 	end)
 end
 
--- Resolve the cooldown duration to use for a spell. Manual override (set
--- in Settings) wins over the API lookup — that's the entire reason it
--- exists, since GetSpellBaseCooldown returns wrong values for some
--- spells in the database. Returns nil only when both the override is
--- absent AND the API returned a sub-2s value (i.e., this isn't a real
--- CD worth tracking).
-local function ResolveDuration(spellId)
-	local override = ns.GetCooldownOverride(spellId)
-	if override and override > 0 then return override end
-	return GetCachedBaseCooldown(spellId)
+-- Read the authoritative post-cast cooldown for the local player. Must
+-- be called AFTER the engine has committed the new CD (which it hasn't
+-- yet at UNIT_SPELLCAST_SUCCEEDED — at that exact moment GetSpellCooldown
+-- returns 0 or just the GCD). We defer 0.1s in OnLocalCast for this
+-- reason; by then C_Spell.GetSpellCooldown.duration is the true value
+-- including talent/proc CDR.
+local function ReadAuthoritativeCooldown(spellId)
+	local cd = C_Spell and C_Spell.GetSpellCooldown and C_Spell.GetSpellCooldown(spellId)
+	if cd and cd.duration and cd.duration > 1.6 then
+		return cd.duration
+	end
+	return nil
 end
 
 function Tracker:OnLocalCast(spellId)
@@ -275,24 +267,42 @@ function Tracker:OnLocalCast(spellId)
 	local tracked = GetTrackedSetForLocalSpec()
 	if not tracked or not tracked[spellId] then return end
 
-	local duration = ResolveDuration(spellId)
-	if not duration then return end
-
-	RecordUsed("player", spellId, duration)
+	-- Instant local feedback with base CD (engine hasn't committed the
+	-- real CD yet). This is a guess; if a talent shortens this spell's
+	-- CD, the deferred-broadcast block below will overwrite with the
+	-- authoritative value 0.1s later.
+	local guess = GetBaseCooldownSeconds(spellId)
+	if not guess then return end
+	RecordUsed("player", spellId, guess)
 	NotifyDisplay("player")
-	ns.Chat:Send("USED", spellId)
-	ScheduleReadyBroadcast(spellId, duration)
-	if ns.Debug then ns.Debug:print("local-used", spellId, "duration=", duration) end
+
+	-- Defer the broadcast + final local-state commit until the engine has
+	-- committed the post-cast CD (one tick + change is enough). This is
+	-- the pattern BliZzi's interrupt tracker uses for the same reason —
+	-- it lets us send the AUTHORITATIVE duration on the wire, so
+	-- receivers don't need a CD-override mechanism on their end.
+	C_Timer.After(0.1, function()
+		local duration = ReadAuthoritativeCooldown(spellId) or guess
+		RecordUsed("player", spellId, duration)
+		NotifyDisplay("player")
+		ns.Chat:Send("USED", spellId, duration)
+		ScheduleReadyBroadcast(spellId, duration)
+		if ns.Debug then ns.Debug:print("local-used", spellId, "dur=", duration) end
+	end)
 end
 
 -- ============================================================
 -- REMOTE FLOW: dispatch incoming messages by verb
 -- ============================================================
 
-function Tracker:OnRemoteMessage(sender, verb, payload)
+-- Chat.lua delivers (sender, verb, args) where args is the parsed
+-- semicolon-split tail of the wire format. INIT: args[1] is a CSV of
+-- spell IDs. USED: args[1] is spellID, args[2] is the authoritative
+-- post-cast duration (seconds) the sender computed. READY: args[1] is
+-- spellID.
+function Tracker:OnRemoteMessage(sender, verb, args)
 	-- Skip echoes of our own outgoing addon messages; the local flow
-	-- already recorded USEDs with accurate timing, and we compute our
-	-- advertised set on demand.
+	-- already recorded USEDs with accurate timing.
 	if sender and UnitIsUnit(sender, "player") then return end
 
 	local unit = ResolveSenderUnit(sender)
@@ -302,19 +312,19 @@ function Tracker:OnRemoteMessage(sender, verb, payload)
 	end
 
 	if verb == "INIT" then
-		self:OnRemoteInit(unit, payload)
+		self:OnRemoteInit(unit, args[1] or "")
 		return
 	end
 
-	local spellId = tonumber(payload)
+	local spellId = tonumber(args[1])
 	if not spellId then
-		if ns.Debug then ns.Debug:print("remote", "bad spellId payload", verb, payload) end
+		if ns.Debug then ns.Debug:print("remote", "bad spellId payload", verb, args[1]) end
 		return
 	end
 
 	-- Guard: ignore USED/READY for spells the sender didn't advertise.
-	-- This silently drops events from a buggy/old/incompatible client
-	-- and keeps each unit's rendered icon set stable.
+	-- Silently drops events from a buggy / old / incompatible client and
+	-- keeps each unit's rendered icon set stable.
 	local adv = advertised[unit]
 	if adv and not adv[spellId] then
 		if ns.Debug then ns.Debug:print("remote", "drop unadvertised", unit, spellId) end
@@ -322,10 +332,13 @@ function Tracker:OnRemoteMessage(sender, verb, payload)
 	end
 
 	if verb == "USED" then
-		-- Override > API > 60s fallback. Override path means a receiver
-		-- and sender configured with the same override show the same
-		-- swipe length, regardless of what their spell database says.
-		local duration = ResolveDuration(spellId) or 60
+		-- Trust the sender's authoritative duration. Falls back to our
+		-- local base-CD lookup if the sender's payload doesn't carry one
+		-- (pre-v0.11 clients), or 60s last-resort if even that fails.
+		local duration = tonumber(args[2])
+		if not duration or duration < 2 then
+			duration = GetBaseCooldownSeconds(spellId) or 60
+		end
 		RecordUsed(unit, spellId, duration)
 	elseif verb == "READY" then
 		RecordReady(unit, spellId)
