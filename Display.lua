@@ -1,15 +1,17 @@
 -- Per-unit horizontal icon row. One icon per tracked spell, ordered by
 -- spellID. Bright = ready, desaturated + cooldown swipe = on cooldown.
 --
--- Rows attach to the unit's Blizzard party / raid frame when one is
--- visible, else to ns.anchorFrame. A 1-second tick re-resolves the
--- frame so toggling between solo/party/raid layouts doesn't strand
--- rows on a hidden anchor target.
+-- Rows attach to the unit's on-screen party / raid frame via the
+-- multi-provider resolver in PartyFrames.lua (ElvUI / Cell / Grid2 /
+-- SUF / Danders / EnhanceQoL / Mich's / Blizzard). When the resolver
+-- returns nil (no UI addon is currently showing that unit) the row
+-- hides — there is no longer a fallback anchor. A 1-second tick
+-- re-resolves the frame so toggling between solo/party/raid layouts
+-- picks up the new frame target automatically.
 --
--- Layout knobs (iconSize / iconGap / growDirection / offsetX / offsetY)
--- live in DzakSharedCDsDB.display and are read fresh on every render —
--- no per-icon mutation when settings change, just call Display:UpdateAll
--- and everything re-lays-out with the new values.
+-- All layout / visual knobs live in DzakSharedCDsDB.display and are
+-- read fresh on every render, so dragging a slider in Settings just
+-- needs to call Display:UpdateAll for the new value to take effect.
 
 local addonName, ns = ...
 
@@ -222,45 +224,31 @@ end
 
 local function AnchorRowToUnit(row, unit, cfg)
 	local frame = ns.PartyFrames:Resolve(unit)
-	row:ClearAllPoints()
-	-- Grow direction = which edge of the anchor frame the row's matching
-	-- edge sits against. Icons then extend INWARD across the anchor's
-	-- interior (toward the opposite edge). LEFT: row's left aligns to the
-	-- frame's left, icons grow rightward into the frame. RIGHT: mirror.
-	-- Use a negative offset to push the row outside the frame entirely.
-	local function attachRow(target, sx, sy)
-		if cfg.growDirection == "LEFT" then
-			row:SetPoint("LEFT", target, "LEFT", sx, sy)
-		else
-			row:SetPoint("RIGHT", target, "RIGHT", -sx, sy)
-		end
+	if not frame then
+		-- No on-screen frame for this unit right now (between roster
+		-- changes, or the user's UI addon is hiding its party header).
+		-- Hide the row entirely — without a fallback anchor there's
+		-- nowhere sensible to put it.
+		row:Hide()
+		return
 	end
 
-	if frame then
-		row:SetParent(frame)
-		row:SetFrameStrata(frame:GetFrameStrata())
-		row:SetFrameLevel(frame:GetFrameLevel() + 5)
-		attachRow(frame, cfg.offsetX, cfg.offsetY)
-		row:Show()
+	row:ClearAllPoints()
+	row:SetParent(frame)
+	row:SetFrameStrata(frame:GetFrameStrata())
+	row:SetFrameLevel(frame:GetFrameLevel() + 5)
+
+	-- Grow direction = which edge of the party frame the row's matching
+	-- edge sits against. Icons then extend INWARD across the frame's
+	-- interior. LEFT: row's left aligns to the frame's left, icons grow
+	-- rightward into the frame. RIGHT: mirror. Use a negative offsetX
+	-- to push the row outside the frame entirely.
+	if cfg.growDirection == "LEFT" then
+		row:SetPoint("LEFT", frame, "LEFT", cfg.offsetX, cfg.offsetY)
 	else
-		-- Fallback: attach to the FerrozEditModeLib-managed anchor. Same
-		-- semantics as the party-frame branch so the Edit Mode preview
-		-- matches in-game. Multiple fallback rows stack downward via
-		-- stackY so they don't pile on top of each other.
-		local anchor = ns.anchorFrame
-		if not anchor then row:Hide(); return end
-		row:SetParent(anchor)
-		row:SetFrameStrata("MEDIUM")
-		row:SetFrameLevel(10)
-		local idx = 0
-		local groupUnits = ns.Tracker:GetGroupUnits()
-		for i, u in ipairs(groupUnits) do
-			if u == unit then idx = i - 1; break end
-		end
-		local stackY = -idx * (cfg.iconSize + cfg.iconGap)
-		attachRow(anchor, cfg.offsetX, cfg.offsetY + stackY)
-		row:Show()
+		row:SetPoint("RIGHT", frame, "RIGHT", -cfg.offsetX, cfg.offsetY)
 	end
+	row:Show()
 end
 
 local function ApplyCooldownVisual(iconFrame, cdEntry, cfg)

@@ -109,7 +109,7 @@ local function GeneralSchema()
 		type = "group",
 		children = {
 			{ type = "header",      label = "General" },
-			{ type = "description", text = "Broadcasts your tracked spell cooldowns to addon-using party members. Icon size, position, and grow direction live in Blizzard's |cffffd100Edit Mode|r — press Esc -> Edit Mode and click the DzakSharedCDs anchor." },
+			{ type = "description", text = "Broadcasts your tracked spell cooldowns to addon-using party members and renders theirs on the party / raid frames. Use the |cffffd100Display|r tab to configure icon size, spacing, and visual style; the |cffffd100Spells|r tab to edit per-spec tracked spells and per-spell CD overrides." },
 			{ type = "checkbox",
 			  id = "DzakSharedCDsDB.enabled",
 			  label = "Enabled",
@@ -118,6 +118,94 @@ local function GeneralSchema()
 			},
 			{ type = "header",      label = "Slash commands" },
 			{ type = "description", text = table.concat(SLASH_HELP_LINES, "\n") },
+		},
+	}
+end
+
+-- Shared onChange factory: forwards the new value into ns.SetDisplaySetting
+-- under the matching key, which writes the DB and triggers Display:UpdateAll
+-- for live-preview behaviour. We intentionally bypass NoobTaco-Config's
+-- State (TempConfig/Commit) on these because we want every slider drag to
+-- repaint the icons immediately, not wait for a Commit step.
+local function dispOnChange(key)
+	return function(value) ns.SetDisplaySetting(key, value) end
+end
+
+local function DisplaySchema()
+	return {
+		type = "group",
+		children = {
+			{ type = "header",      label = "Layout" },
+			{ type = "slider",
+			  id = "DzakSharedCDsDB.display.iconSize",
+			  label = "Icon size",
+			  min = 12, max = 64, step = 1,
+			  default = ns.DEFAULT_DISPLAY.iconSize,
+			  onChange = dispOnChange("iconSize") },
+			{ type = "slider",
+			  id = "DzakSharedCDsDB.display.iconGap",
+			  label = "Icon spacing",
+			  min = 0, max = 16, step = 1,
+			  default = ns.DEFAULT_DISPLAY.iconGap,
+			  onChange = dispOnChange("iconGap") },
+			{ type = "dropdown",
+			  id = "DzakSharedCDsDB.display.growDirection",
+			  label = "Grow direction",
+			  default = ns.DEFAULT_DISPLAY.growDirection,
+			  options = {
+				{ value = "RIGHT", label = "Right (icons grow leftward from frame's right edge)" },
+				{ value = "LEFT",  label = "Left (icons grow rightward from frame's left edge)" },
+			  },
+			  onChange = dispOnChange("growDirection") },
+			{ type = "slider",
+			  id = "DzakSharedCDsDB.display.offsetX",
+			  label = "Offset X",
+			  min = -100, max = 100, step = 1,
+			  default = ns.DEFAULT_DISPLAY.offsetX,
+			  onChange = dispOnChange("offsetX") },
+			{ type = "slider",
+			  id = "DzakSharedCDsDB.display.offsetY",
+			  label = "Offset Y",
+			  min = -100, max = 100, step = 1,
+			  default = ns.DEFAULT_DISPLAY.offsetY,
+			  onChange = dispOnChange("offsetY") },
+
+			{ type = "header",      label = "Visual" },
+			{ type = "slider",
+			  id = "DzakSharedCDsDB.display.borderSize",
+			  label = "Border thickness",
+			  min = 0, max = 4, step = 1,
+			  default = ns.DEFAULT_DISPLAY.borderSize,
+			  onChange = dispOnChange("borderSize") },
+			{ type = "description", text = "|cff888888Border color is currently black — edit DzakSharedCDsDB.display.borderColorR/G/B/A manually for custom colors (NoobTaco-Config's colorpicker is a stub in this version).|r" },
+			{ type = "checkbox",
+			  id = "DzakSharedCDsDB.display.cdGrayout",
+			  label = "Gray out icons while on cooldown",
+			  default = ns.DEFAULT_DISPLAY.cdGrayout,
+			  onChange = dispOnChange("cdGrayout") },
+			{ type = "checkbox",
+			  id = "DzakSharedCDsDB.display.cdShowMinutes",
+			  label = "Show minutes (\"5m\") when cooldown >= 60s",
+			  default = ns.DEFAULT_DISPLAY.cdShowMinutes,
+			  onChange = dispOnChange("cdShowMinutes") },
+			{ type = "slider",
+			  id = "DzakSharedCDsDB.display.cdTextFontSize",
+			  label = "Cooldown text font size",
+			  min = 8, max = 24, step = 1,
+			  default = ns.DEFAULT_DISPLAY.cdTextFontSize,
+			  onChange = dispOnChange("cdTextFontSize") },
+
+			{ type = "header",      label = "Reset" },
+			{ type = "button",
+			  label = "Reset display defaults",
+			  onClick = function()
+				ns.ResetDisplayDefaults()
+				-- Re-render the Display section so the live slider values
+				-- snap back to defaults too.
+				if sectionRenderers.display and layoutContainer then
+					sectionRenderers.display(layoutContainer.ContentChild)
+				end
+			  end },
 		},
 	}
 end
@@ -450,6 +538,18 @@ sectionRenderers.about = function(content)
 	end
 end
 
+sectionRenderers.display = function(content)
+	for _, child in ipairs({ content:GetChildren() }) do
+		if child._dscdSpellsSection then
+			child:Hide()
+			child:SetParent(nil)
+		end
+	end
+	if Renderer and layoutContainer then
+		Renderer:Render(DisplaySchema(), layoutContainer)
+	end
+end
+
 -- ============================================================
 -- BUILD THE LAYOUT ON FIRST SHOW
 -- ============================================================
@@ -474,6 +574,9 @@ local function EnsureLayout()
 
 	Layout:AddSidebarButton(layoutContainer, "general", "General", function()
 		sectionRenderers.general(layoutContainer.ContentChild)
+	end)
+	Layout:AddSidebarButton(layoutContainer, "display", "Display", function()
+		sectionRenderers.display(layoutContainer.ContentChild)
 	end)
 	Layout:AddSidebarButton(layoutContainer, "spells", "Spells", function()
 		sectionRenderers.spells(layoutContainer.ContentChild)

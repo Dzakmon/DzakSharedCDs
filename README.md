@@ -4,7 +4,7 @@ A small WoW retail addon that lets a 5-man dungeon group **see each other's majo
 
 How it works in one line: each client broadcasts when it casts a tracked spell over a hidden addon-message channel; receivers render that as an icon with a cooldown swipe on the sender's party frame.
 
-Status: **v0.8.0** — BliZzi_Interrupts-inspired polish: multi-provider unit-frame resolver (ElvUI / Cell / Grid2 / SUF / Danders / EnhanceQoL / Mich's / Blizzard), outward-border icon style with outlined countdown text, versioned wire format `D1;VERB;arg1;...` with multi-channel send fallback (INSTANCE_CHAT → PARTY → WHISPER) for Timed M+ resilience.
+Status: **v0.9.0** — Anchor frame + FerrozEditModeLib removed; rows now attach to the resolved party / raid frame only, or hide if no frame is available. All icon size / spacing / grow / border / countdown settings moved from Edit Mode into a new **Display** tab in the Settings panel.
 
 ---
 
@@ -120,7 +120,7 @@ One icon row per group unit, attached to the unit's on-screen frame. The multi-p
 
 Each provider's visibility is checked at resolve time (the addon may be loaded but currently hiding its party header — ElvUI's party + raid headers coexist), and the frame's bound unit is read via `:GetAttribute("unit")` first because the attribute survives child recycling on roster changes. Direct string comparison is used instead of `UnitIsUnit()` to side-step 12.0.5's tainted-bool issue on secret values.
 
-When no provider matches, rows fall back to the FerrozEditModeLib-managed anchor and stagger vertically. A 1s ticker re-resolves the frame so toggling layouts (solo → party → raid) doesn't strand rows on a hidden anchor target.
+When no provider matches (e.g. mid-roster-shuffle, or a UI addon is temporarily hiding its party header), the affected row is simply hidden until the next 1s re-anchor tick. There is no fallback anchor frame — v0.9.0 removed it because the multi-provider resolver covers the cases the anchor used to backstop. A 1s ticker re-resolves the frame so toggling layouts (solo → party → raid) doesn't strand rows on a hidden anchor target.
 
 **Icon style** (BliZzi_Interrupts-inspired):
 
@@ -131,17 +131,22 @@ When no provider matches, rows fall back to the FerrozEditModeLib-managed anchor
 - **Gray-out on cooldown** (toggle: `cdGrayout`, default ON) — `SetDesaturated(true)` while ticking, restored on `OnCooldownDone`.
 - **Tooltip on hover** via `GameTooltip:SetSpellByID`.
 
-**Sizing & positioning** live in **Edit Mode** — press Esc → Edit Mode and click the DzakSharedCDs anchor. The same 5 controls are exposed as a plugin panel via `FerrozEditModeLib`'s `GetOrCreateFrameSpecificControls` hook:
+**All sizing / positioning / visual settings live in the Settings panel's Display tab** (`/dscd` → Display). Live preview — every slider drag immediately repaints the icons.
 
-| Setting          | Default  | Range    | Effect                                                              |
-| ---------------- | -------- | -------- | ------------------------------------------------------------------- |
-| Icon size        | 24 px    | 12–64    | Width and height of every icon.                                     |
-| Icon spacing     | 2 px     | 0–16     | Gap between icons.                                                  |
-| Grow direction   | Right    | Left/Right | Which way the row extends from the unit's frame.                  |
-| Offset X         | 6 px     | -100–100 | Horizontal nudge between the frame edge and the row.                |
-| Offset Y         | 0 px     | -100–100 | Vertical nudge.                                                     |
+| Setting                  | Default | Range          | Effect                                                              |
+| ------------------------ | ------- | -------------- | ------------------------------------------------------------------- |
+| Icon size                | 24 px   | 12–64          | Width and height of every icon.                                     |
+| Icon spacing             | 2 px    | 0–16           | Gap between icons.                                                  |
+| Grow direction           | Right   | Left / Right   | Which edge of the party frame the row anchors against; icons grow inward from there. |
+| Offset X                 | 6 px    | -100–100       | Horizontal nudge between the frame edge and the row.                |
+| Offset Y                 | 0 px    | -100–100       | Vertical nudge.                                                     |
+| Border thickness         | 1 px    | 0–4            | Outward-drawn border around each icon. `0` disables the border.     |
+| Border color (R/G/B/A)   | Black   | 0.0–1.0 each   | Edit `DzakSharedCDsDB.display.borderColor{R,G,B,A}` manually for now — NoobTaco-Config's color picker is a stub. |
+| Gray out on cooldown     | On      | toggle         | `SetDesaturated(true)` while a CD is ticking.                       |
+| Show minutes (≥60s)      | On      | toggle         | Renders `"5m"` instead of `"300"` once remaining ≥ 60s.             |
+| Cooldown text font size  | 14      | 8–24           | Size of the outlined countdown number drawn on top of the icon.     |
 
-Edit Mode also gives free scale and opacity controls for the anchor itself (via Ferroz's built-in standard controls). All settings persist to `DzakSharedCDsDB.display` / `DzakSharedCDsDB.anchor.layouts.<layoutName>`.
+All values persist to `DzakSharedCDsDB.display`. The "Reset display defaults" button in the Display tab restores every key to its `ns.DEFAULT_DISPLAY` value.
 
 ---
 
@@ -152,7 +157,6 @@ DzakSharedCDs/
   DzakSharedCDs.toc       ← TOC: interfaces 120005, 120007 (Midnight); SavedVariables DzakSharedCDsDB
   README.md               ← this file
   Debug.lua               ← /dscddebug + ns.Debug:print(label, ...) (no-op when disabled)
-  Anchor.lua              ← ns.anchorFrame (LibEditMode-managed fallback)
   ClassDefaults.lua       ← DEFAULT_SPELLS_BY_SPEC + ALL_SPECS + GetSpecInfo/FormatSpecLabel
   SpecCache.lua           ← LibSpecialization wrapper: name → specId
   Chat.lua                ← CHAT_MSG_ADDON wire layer (send + receive on prefix "DSCD")
@@ -165,7 +169,6 @@ DzakSharedCDs/
   Libs/
     LibStub/
     LibSpecialization/
-    FerrozEditModeLib/    ← native Edit Mode integration (replaces LibEditMode)
     NoobTaco-Config/      ← schema-driven Settings UI engine
 ```
 
@@ -174,13 +177,12 @@ Load order matters (declared in the TOC, top → bottom):
 ```
 Libs ............................. third-party
 Debug ............................ ns.Debug (no deps)
-Anchor ........................... ns.anchorFrame (uses ns.Debug, LibEditMode)
 ClassDefaults .................... ns.DEFAULT_SPELLS_BY_SPEC, ns.ALL_SPECS
 SpecCache ........................ ns.SpecCache (uses LibSpecialization)
 Chat ............................. ns.Chat (no other ns deps)
 PartyFrames ...................... ns.PartyFrames (no other ns deps)
 Tracker .......................... ns.Tracker (uses Chat, SpecCache, ClassDefaults)
-Display .......................... ns.Display (uses Tracker, SpecCache, PartyFrames, Anchor)
+Display .......................... ns.Display (uses Tracker, SpecCache, PartyFrames)
 Main ............................. seeds DB, wires events, registers /dscd
 Settings ......................... uses ns.* helpers from Main + ClassDefaults
 ```
@@ -249,6 +251,7 @@ Per-spec lists are seeded **lazily** from `ns.DEFAULT_SPELLS_BY_SPEC[specId]` th
 Migration:
 - v0.2.0+ dropped the old flat `trackedSpells` set from v0.1.0 unconditionally (the migration target was ambiguous).
 - v0.7.0 ports `DzakSharedCDsDB.anchor = { point, x, y, enabled }` to FerrozEditModeLib's `{ layouts = { Modern = {...} } }` shape on first load. Legacy keys are cleared after porting.
+- v0.9.0 removed the anchor entirely. The `DzakSharedCDsDB.anchor` key is left in place as a harmless orphan — clean it up with `DzakSharedCDsDB.anchor = nil` if it bothers you.
 
 ---
 
@@ -257,10 +260,6 @@ Migration:
 ### `Debug.lua`
 - `ns.Debug:print(label, ...)` — no-op when `DzakSharedCDsDB.debug` is false.
 - Slash: `/dscddebug [on|off]`.
-
-### `Anchor.lua`
-- `ns.anchorFrame` — `FRAME` registered with **FerrozEditModeLib** (mixes in `EditModeSystemMixin` so the anchor appears alongside native Edit Mode systems). Position / scale / opacity persisted per Edit Mode layout in `DzakSharedCDsDB.anchor.layouts`. Used as the fallback when a unit's Blizzard party frame can't be resolved.
-- `anchor:GetOrCreateFrameSpecificControls(socket)` — Ferroz calls this when the user opens its config popup for our frame; we return a plugin panel hosting the 5 display sliders (icon size / spacing / grow / offsetX / offsetY) and a "Reset display defaults" button.
 
 ### `ClassDefaults.lua`
 - `ns.DEFAULT_SPELLS_BY_SPEC[specId] = { [spellId] = true, ... }` — ~265 spell IDs across all 39 retail specs, defensives / offensives / healer CDs only (≥45s cooldowns). Verified against Wowhead / Warcraft Wiki for Midnight 12.0.x.
@@ -310,8 +309,13 @@ Internally wraps `LibSpecialization.RegisterGroup`.
 - Slash: `/dscd`, `/dscd status`, `/dscd init`, `/dscd broadcast`, `/dscd ping`.
 
 ### `Settings.lua`
-- Blizzard Settings canvas hosting a **NoobTaco-Config** two-column layout. Sidebar buttons: **General** (master Enable + slash commands), **Spells** (spec dropdown + per-spec list with override editbox + remove), **About** (version + credits). General / About sections use NoobTaco-Config's schema renderer; the Spells section is built imperatively because the schema doesn't model dynamic per-row composite widgets.
-- `ns.OpenSettings()` opens the panel programmatically.
+- Standalone movable window hosting a **NoobTaco-Config** two-column layout. Sidebar buttons:
+  - **General** — master Enable + slash command reference.
+  - **Display** — icon size / spacing / grow direction / offsets / border thickness / gray-out toggle / minutes toggle / countdown font size. Live preview via `dispOnChange` → `ns.SetDisplaySetting` → `Display:UpdateAll`. Plus a "Reset display defaults" button.
+  - **Spells** — spec dropdown + per-spec list with override editbox + remove.
+  - **About** — version + credits.
+- General / Display / About sections use NoobTaco-Config's schema renderer; the Spells section is built imperatively because the schema doesn't model dynamic per-row composite widgets.
+- `ns.OpenSettings()` toggles the window programmatically (also bound to `/dscd` with no args).
 
 ---
 
@@ -319,7 +323,7 @@ Internally wraps `LibSpecialization.RegisterGroup`.
 
 1. **Cooldown durations are base values, not runtime-modified.** For the local player we cache `C_Spell.GetSpellBaseCooldown(spellId)` at the moment we build the advertised set (using `GetSpellCooldown` at `UNIT_SPELLCAST_SUCCEEDED` time races the engine — it returns 0 or just the GCD). For remote players we look up the same base cooldown on the *receiver's* client. Either way, talent-based CDR (Glimmer-style reductions, etc.) is not reflected. **Workaround**: each row in the Settings spell list has a small "CD override" field — type the correct duration in seconds and it'll win over the API on both the send and receive paths. Leave it blank to use the API value. Stored globally per spell ID in `DzakSharedCDsDB.cooldownOverrides`.
 
-2. **No third-party UI support yet.** Rows attach to default Blizzard frames only (`CompactPartyFrameMemberN`, `PartyFrame.MemberFrameN`, `CompactRaidFrameN`). ElvUI / Grid2 / Vuhdo / Cell / NDui users fall back to the FerrozEditModeLib-managed anchor. Adding more is straightforward — mirror the patterns in MiniCC's `Core/Frames.lua`.
+2. **Third-party UI support** covers ElvUI / Cell / Grid2 / SUF / Danders / EnhanceQoL / Mich's RaidFrames in addition to Blizzard. Vuhdo / NDui / Plexus are NOT detected yet — those users will see no icons until support is added in [PartyFrames.lua](PartyFrames.lua). Adding more providers is straightforward — same pattern as the existing finders (probe the addon's container global, scan its numbered children).
 
 3. **Spec discovery requires LibSpecialization on the party member's side.** Standalone but most addons ship it. Without it, their row stays hidden because we don't know their spec.
 

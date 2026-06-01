@@ -2,23 +2,13 @@
 ## Title: DzakSharedCDs
 ## Notes: Broadcasts your tracked spell cooldowns to addon-using party members and shows theirs back, via a hidden addon-message channel.
 ## Author: Dzak
-## Version: 0.8.0
+## Version: 0.9.0
 ## SavedVariables: DzakSharedCDsDB
 ## IconTexture: Interface\Icons\Spell_Holy_BorrowedTime
 
 # ============ Embedded libraries ============
 # LibStub first — every other lib gates registration through it.
 Libs\LibStub\LibStub.lua
-
-# FerrozEditModeLib bundles its own LibStub + CallbackHandler-1.0 +
-# LibSharedMedia-3.0. We load the bundled LibStub too — LibStub is
-# version-dedupe-safe, and matching Ferroz's own TOC order avoids any
-# load-time lookup expecting it on disk at this path.
-Libs\FerrozEditModeLib\Libs\LibStub\LibStub.lua
-Libs\FerrozEditModeLib\Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
-Libs\FerrozEditModeLib\Libs\LibSharedMedia-3.0\LibSharedMedia-3.0.lua
-Libs\FerrozEditModeLib\FerrozEditModeLib.lua
-Libs\FerrozEditModeLib\FerrozConfigWindow.lua
 
 # NoobTaco-Config: schema-driven settings UI. Its own LibStub redirects
 # to ours; Internal/* are the engine modules. Same load-order rule —
@@ -36,7 +26,6 @@ Libs\LibSpecialization\LibSpecialization\LibSpecialization.lua
 
 # ============ Addon source ============
 Debug.lua
-Anchor.lua
 ClassDefaults.lua
 SpecCache.lua
 Chat.lua
