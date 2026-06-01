@@ -1,10 +1,21 @@
 -- Per-spec default tracked-spell lists. Scope: defensive, offensive, and
--- healer cooldowns only (>= ~45s CDs). Excluded: interrupts, CC, utility
--- (combat res, MD), trinkets, GCD-bound abilities, movement.
+-- healer cooldowns only (>= ~45s CDs, with a couple of tracked-everywhere
+-- exceptions like Wake of Ashes and Spell Reflection). Excluded:
+-- interrupts, CC, combat-res, trinkets, GCD-bound abilities, movement
+-- without DR.
 --
--- Some entries are talent-locked but commonly taken; users can prune via
--- the Settings panel per spec. Spell IDs verified against Wowhead /
--- Warcraft Wiki for Midnight (patch 12.0.x, May 2026).
+-- v0.10.0: consolidated from cross-referencing PetesDefensiveHistory's
+-- AbilityDb and Blizzi_Interrupts's PartyCooldowns SPELL_DEFS. Both are
+-- Midnight 12.0.x current. Notable adds vs the v0.9.x list: Alter Time
+-- on all mage specs, Survival of the Fittest for hunters, Zenith for
+-- WW, Dispersion for Shadow, Last Resort for Vengeance, Berserk for
+-- Guardian, Takedown for Survival, Ret-Divine-Protection variant.
+-- Dropped 4 entries neither source backed (Pulverize, Force of Nature,
+-- Aegis of Light, Eye of Tyr) plus Arms Enraged Regeneration which
+-- BliZzi flags as Fury-only post-rework.
+--
+-- Some entries are talent-locked but commonly taken; users can prune
+-- via the Settings panel per spec.
 
 local addonName, ns = ...
 
@@ -53,6 +64,7 @@ ns.DEFAULT_SPELLS_BY_SPEC = {
 		[196555] = true, -- Netherwalk (talent)
 		[198589] = true, -- Blur (talent)
 		[370965] = true, -- The Hunt
+		[209258] = true, -- Last Resort
 	},
 
 	-- ============ DRUID ============
@@ -62,7 +74,6 @@ ns.DEFAULT_SPELLS_BY_SPEC = {
 		[194223] = true, -- Celestial Alignment
 		[102560] = true, -- Incarnation: Chosen of Elune (talent)
 		[391528] = true, -- Convoke the Spirits (talent)
-		[205636] = true, -- Force of Nature (talent)
 		[124974] = true, -- Nature's Vigil (talent)
 	},
 	[103] = { -- Feral
@@ -76,8 +87,8 @@ ns.DEFAULT_SPELLS_BY_SPEC = {
 		[22812]  = true, -- Barkskin
 		[61336]  = true, -- Survival Instincts
 		[200851] = true, -- Rage of the Sleeper
+		[50334]  = true, -- Berserk
 		[102558] = true, -- Incarnation: Guardian of Ursoc (talent)
-		[80313]  = true, -- Pulverize (talent)
 	},
 	[105] = { -- Restoration
 		[22812]  = true, -- Barkskin
@@ -103,7 +114,7 @@ ns.DEFAULT_SPELLS_BY_SPEC = {
 		[374348] = true, -- Renewing Blaze
 		[363534] = true, -- Rewind
 		[359816] = true, -- Dream Flight (talent)
-		[357170] = true, -- Time Dilation
+		[357170] = true, -- Time Dilation (talent)
 		[370553] = true, -- Tip the Scales
 		[370960] = true, -- Emerald Communion (talent)
 		[378441] = true, -- Time Stop (talent)
@@ -114,28 +125,32 @@ ns.DEFAULT_SPELLS_BY_SPEC = {
 		[395152] = true, -- Ebon Might
 		[403631] = true, -- Breath of Eons
 		[370553] = true, -- Tip the Scales
-		[357170] = true, -- Time Dilation
+		[357170] = true, -- Time Dilation (talent)
 	},
 
 	-- ============ HUNTER ============
 	[253] = { -- Beast Mastery
-		[186265] = true, -- Aspect of the Turtle
-		[109304] = true, -- Exhilaration
-		[19574]  = true, -- Bestial Wrath
-		[193530] = true, -- Aspect of the Wild (talent)
-		[359844] = true, -- Call of the Wild (talent)
+		[186265]  = true, -- Aspect of the Turtle
+		[264735]  = true, -- Survival of the Fittest
+		[109304]  = true, -- Exhilaration
+		[19574]   = true, -- Bestial Wrath
+		[193530]  = true, -- Aspect of the Wild (talent)
+		[359844]  = true, -- Call of the Wild (talent)
 	},
 	[254] = { -- Marksmanship
-		[186265] = true, -- Aspect of the Turtle
-		[109304] = true, -- Exhilaration
-		[288613] = true, -- Trueshot
-		[359844] = true, -- Call of the Wild (talent)
+		[186265]  = true, -- Aspect of the Turtle
+		[264735]  = true, -- Survival of the Fittest
+		[109304]  = true, -- Exhilaration
+		[288613]  = true, -- Trueshot
+		[359844]  = true, -- Call of the Wild (talent)
 	},
 	[255] = { -- Survival
-		[186265] = true, -- Aspect of the Turtle
-		[109304] = true, -- Exhilaration
-		[266779] = true, -- Coordinated Assault
-		[359844] = true, -- Call of the Wild (talent)
+		[186265]  = true, -- Aspect of the Turtle
+		[264735]  = true, -- Survival of the Fittest
+		[109304]  = true, -- Exhilaration
+		[266779]  = true, -- Coordinated Assault
+		[1250646] = true, -- Takedown (Midnight)
+		[359844]  = true, -- Call of the Wild (talent)
 	},
 
 	-- ============ MAGE ============
@@ -145,6 +160,7 @@ ns.DEFAULT_SPELLS_BY_SPEC = {
 		[235450] = true, -- Prismatic Barrier
 		[365350] = true, -- Arcane Surge
 		[55342]  = true, -- Mirror Image
+		[342245] = true, -- Alter Time
 		[414660] = true, -- Mass Barrier (Sunfury hero talent)
 	},
 	[63] = { -- Fire
@@ -153,6 +169,7 @@ ns.DEFAULT_SPELLS_BY_SPEC = {
 		[235313] = true, -- Blazing Barrier
 		[190319] = true, -- Combustion
 		[55342]  = true, -- Mirror Image
+		[342245] = true, -- Alter Time
 	},
 	[64] = { -- Frost
 		[45438]  = true, -- Ice Block
@@ -161,7 +178,8 @@ ns.DEFAULT_SPELLS_BY_SPEC = {
 		[12472]  = true, -- Icy Veins
 		[235219] = true, -- Cold Snap
 		[55342]  = true, -- Mirror Image
-		[414658] = true, -- Ice Cold (Frostfire hero talent)
+		[342245] = true, -- Alter Time
+		[414659] = true, -- Ice Cold (Frostfire hero talent)
 	},
 
 	-- ============ MONK ============
@@ -187,14 +205,15 @@ ns.DEFAULT_SPELLS_BY_SPEC = {
 		[386276] = true, -- Bonedust Brew (talent)
 	},
 	[269] = { -- Windwalker
-		[115203] = true, -- Fortifying Brew
-		[122470] = true, -- Touch of Karma
-		[122278] = true, -- Dampen Harm (talent)
-		[122783] = true, -- Diffuse Magic (talent)
-		[123904] = true, -- Invoke Xuen, the White Tiger
-		[137639] = true, -- Storm, Earth, and Fire
-		[386276] = true, -- Bonedust Brew (talent)
-		[387184] = true, -- Weapons of Order (talent)
+		[115203]  = true, -- Fortifying Brew
+		[122470]  = true, -- Touch of Karma
+		[122278]  = true, -- Dampen Harm (talent)
+		[122783]  = true, -- Diffuse Magic (talent)
+		[123904]  = true, -- Invoke Xuen, the White Tiger
+		[137639]  = true, -- Storm, Earth, and Fire
+		[1249625] = true, -- Zenith (Midnight)
+		[386276]  = true, -- Bonedust Brew (talent)
+		[387184]  = true, -- Weapons of Order (talent)
 	},
 
 	-- ============ PALADIN ============
@@ -222,13 +241,11 @@ ns.DEFAULT_SPELLS_BY_SPEC = {
 		[31884]  = true, -- Avenging Wrath (talent)
 		[389539] = true, -- Sentinel (talent - alt to AW)
 		[375576] = true, -- Divine Toll
-		[204150] = true, -- Aegis of Light (talent)
 		[378974] = true, -- Bastion of Light (talent)
-		[387174] = true, -- Eye of Tyr
 	},
 	[70] = { -- Retribution
 		[642]    = true, -- Divine Shield
-		[498]    = true, -- Divine Protection
+		[403876] = true, -- Divine Protection (Ret variant, talent)
 		[1022]   = true, -- Blessing of Protection
 		[6940]   = true, -- Blessing of Sacrifice
 		[633]    = true, -- Lay on Hands
@@ -262,6 +279,7 @@ ns.DEFAULT_SPELLS_BY_SPEC = {
 	},
 	[258] = { -- Shadow
 		[19236]  = true, -- Desperate Prayer
+		[47585]  = true, -- Dispersion
 		[15286]  = true, -- Vampiric Embrace
 		[228260] = true, -- Void Eruption / Voidform
 		[391109] = true, -- Dark Ascension (talent - alt to Voidform)
@@ -357,7 +375,6 @@ ns.DEFAULT_SPELLS_BY_SPEC = {
 
 	-- ============ WARRIOR ============
 	[71] = { -- Arms
-		[184364] = true, -- Enraged Regeneration
 		[118038] = true, -- Die by the Sword
 		[23920]  = true, -- Spell Reflection
 		[97462]  = true, -- Rallying Cry
@@ -369,8 +386,8 @@ ns.DEFAULT_SPELLS_BY_SPEC = {
 		[384318] = true, -- Thunderous Roar (talent)
 	},
 	[72] = { -- Fury
-		[184364] = true, -- Enraged Regeneration
-		[118038] = true, -- Die by the Sword
+		[184364] = true, -- Enraged Regeneration (talent)
+		[118038] = true, -- Die by the Sword (talent)
 		[23920]  = true, -- Spell Reflection
 		[97462]  = true, -- Rallying Cry
 		[1719]   = true, -- Recklessness
@@ -386,7 +403,7 @@ ns.DEFAULT_SPELLS_BY_SPEC = {
 		[23920]  = true, -- Spell Reflection
 		[97462]  = true, -- Rallying Cry
 		[1160]   = true, -- Demoralizing Shout
-		[184364] = true, -- Enraged Regeneration
+		[184364] = true, -- Enraged Regeneration (talent)
 		[107574] = true, -- Avatar
 		[385952] = true, -- Shield Charge (talent)
 		[228920] = true, -- Ravager (talent)

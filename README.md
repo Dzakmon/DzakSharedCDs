@@ -4,7 +4,7 @@ A small WoW retail addon that lets a 5-man dungeon group **see each other's majo
 
 How it works in one line: each client broadcasts when it casts a tracked spell over a hidden addon-message channel; receivers render that as an icon with a cooldown swipe on the sender's party frame.
 
-Status: **v0.9.0** — Anchor frame + FerrozEditModeLib removed; rows now attach to the resolved party / raid frame only, or hide if no frame is available. All icon size / spacing / grow / border / countdown settings moved from Edit Mode into a new **Display** tab in the Settings panel.
+Status: **v0.10.0** — Default tracked-spell list rebuilt by cross-referencing PetesDefensiveHistory's `AbilityDb` and Blizzi_Interrupts's `SPELL_DEFS`. Net adds: Alter Time (all mage specs), Survival of the Fittest (hunters), Zenith (WW), Dispersion (Shadow), Last Resort (Vengeance), Berserk (Guardian), Takedown (Survival), Ret-specific Divine Protection. Drops 4 unverified entries that neither inspiration source backed.
 
 ---
 
@@ -262,7 +262,7 @@ Migration:
 - Slash: `/dscddebug [on|off]`.
 
 ### `ClassDefaults.lua`
-- `ns.DEFAULT_SPELLS_BY_SPEC[specId] = { [spellId] = true, ... }` — ~265 spell IDs across all 39 retail specs, defensives / offensives / healer CDs only (≥45s cooldowns). Verified against Wowhead / Warcraft Wiki for Midnight 12.0.x.
+- `ns.DEFAULT_SPELLS_BY_SPEC[specId] = { [spellId] = true, ... }` — ~283 spell IDs across all 39 retail specs, defensives / offensives / healer CDs only (≥45s cooldowns, with a couple of tracked-everywhere exceptions like Wake of Ashes and Spell Reflection). Cross-referenced against PetesDefensiveHistory's `AbilityDb` and Blizzi_Interrupts's `SPELL_DEFS` for Midnight 12.0.x — the union of what both production addons consider trackable, minus our addon's broadcast-only restrictions (no interrupts / CC / movement / trinkets / racials).
 - `ns.ALL_SPECS` — ordered list of `{ specId, classToken, className, specName, role }`.
 - `ns.GetSpecInfo(specId)` / `ns.FormatSpecLabel(specId)` — display helpers.
 
