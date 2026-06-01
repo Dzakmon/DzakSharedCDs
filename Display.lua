@@ -25,12 +25,30 @@ local rows = {}
 -- function — called once per Render*; cheap.
 local function GetCfg()
 	return {
-		iconSize      = ns.GetDisplaySetting("iconSize"),
-		iconGap       = ns.GetDisplaySetting("iconGap"),
-		growDirection = ns.GetDisplaySetting("growDirection"),
-		offsetX       = ns.GetDisplaySetting("offsetX"),
-		offsetY       = ns.GetDisplaySetting("offsetY"),
+		iconSize       = ns.GetDisplaySetting("iconSize"),
+		iconGap        = ns.GetDisplaySetting("iconGap"),
+		growDirection  = ns.GetDisplaySetting("growDirection"),
+		offsetX        = ns.GetDisplaySetting("offsetX"),
+		offsetY        = ns.GetDisplaySetting("offsetY"),
+		borderSize     = ns.GetDisplaySetting("borderSize"),
+		borderColorR   = ns.GetDisplaySetting("borderColorR"),
+		borderColorG   = ns.GetDisplaySetting("borderColorG"),
+		borderColorB   = ns.GetDisplaySetting("borderColorB"),
+		borderColorA   = ns.GetDisplaySetting("borderColorA"),
+		cdGrayout      = ns.GetDisplaySetting("cdGrayout"),
+		cdShowMinutes  = ns.GetDisplaySetting("cdShowMinutes"),
+		cdTextFontSize = ns.GetDisplaySetting("cdTextFontSize"),
 	}
+end
+
+-- Round-up integer countdown, with "5m" shorthand once we cross 60s and
+-- the user has enabled minutes formatting. Matches BliZzi's style.
+local function FormatRemaining(rem, showMinutes)
+	if rem <= 0 then return "" end
+	if rem >= 60 and showMinutes then
+		return string.format("%dm", math.floor(rem / 60 + 0.5))
+	end
+	return tostring(math.ceil(rem))
 end
 
 local function GetTrackedSortedForUnit(unit)
@@ -64,21 +82,67 @@ end
 
 local function CreateIcon(parent)
 	local f = CreateFrame("Frame", nil, parent)
-	-- Size set by RenderRow; we only need a placeholder here.
+	-- Size set by RenderRow; placeholder until then.
 	f:SetSize(1, 1)
 
 	f.icon = f:CreateTexture(nil, "BACKGROUND", nil, 1)
 	f.icon:SetAllPoints()
 	f.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
+	-- Blizzard cooldown swipe — we draw our own countdown text on top
+	-- (HideCountdownNumbers below) so the look stays consistent without
+	-- depending on OmniCC. The swipe + bling are still Blizzard's.
 	f.cooldown = CreateFrame("Cooldown", nil, f, "CooldownFrameTemplate")
 	f.cooldown:SetAllPoints()
 	f.cooldown:SetDrawEdge(false)
 	f.cooldown:SetDrawBling(false)
-	f.cooldown:SetHideCountdownNumbers(false)
+	f.cooldown:SetHideCountdownNumbers(true)
 	f.cooldown:SetSwipeColor(0, 0, 0, 0.8)
 	f.cooldown:SetScript("OnCooldownDone", function()
 		f.icon:SetDesaturated(false)
+		if f.text then f.text:SetText("") end
+	end)
+
+	-- Outward-drawn border overlay (BliZzi pattern): a sibling Frame
+	-- sized SLIGHTLY LARGER than the icon so the backdrop edgeFile —
+	-- which Blizzard renders inward from the frame's edges — ends up
+	-- sitting OUTSIDE the icon area instead of eating into the texture.
+	-- ApplyIconBorder() resizes + restyles it from current cfg.
+	f.borderOverlay = CreateFrame("Frame", nil, f, "BackdropTemplate")
+	f.borderOverlay:SetAllPoints(f)
+	f.borderOverlay:EnableMouse(false)
+
+	-- Countdown text overlay. Lives on a higher-frame-level sibling so
+	-- it always renders above the cooldown swipe and the border. Font
+	-- + size assigned in ApplyIconText() so live size changes take
+	-- effect without rebuilding the icon.
+	local cdOverlay = CreateFrame("Frame", nil, f)
+	cdOverlay:SetAllPoints(f)
+	cdOverlay:SetFrameLevel(f:GetFrameLevel() + 30)
+	f.text = cdOverlay:CreateFontString(nil, "OVERLAY")
+	f.text:SetPoint("CENTER", cdOverlay, "CENTER", 0, 0)
+	f.text:SetJustifyH("CENTER")
+	f.text:SetTextColor(1, 1, 1)
+
+	-- Per-icon tick: refresh the countdown text while a CD is running.
+	-- One OnUpdate per visible icon is fine at our scale (~25 icons
+	-- max), avoids the global-walker complexity, and naturally stops
+	-- when the icon is hidden (Blizzard suspends OnUpdate on hidden
+	-- frames). Throttled to ~10Hz which is plenty for whole-second
+	-- digits.
+	f._tickAccum = 0
+	f:SetScript("OnUpdate", function(self, elapsed)
+		self._tickAccum = (self._tickAccum or 0) + elapsed
+		if self._tickAccum < 0.1 then return end
+		self._tickAccum = 0
+		if not self._cdExpiry or not self.text then return end
+		local rem = self._cdExpiry - GetTime()
+		if rem <= 0 then
+			self.text:SetText("")
+			self._cdExpiry = nil
+		else
+			self.text:SetText(FormatRemaining(rem, self._cdShowMinutes))
+		end
 	end)
 
 	-- Tooltip on hover so the user can see what each icon represents.
@@ -91,6 +155,42 @@ local function CreateIcon(parent)
 	f:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 	return f
+end
+
+-- Apply / refresh the outward border per current cfg. Border size 0
+-- collapses the overlay to the icon bounds and clears the backdrop —
+-- effectively disabling the border without leaking frame memory.
+local function ApplyIconBorder(icon, cfg)
+	local bo = icon.borderOverlay
+	if not bo then return end
+	local sz = cfg.borderSize or 0
+	bo:ClearAllPoints()
+	if sz > 0 then
+		bo:SetPoint("TOPLEFT",     icon, "TOPLEFT",     -sz,  sz)
+		bo:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT",  sz, -sz)
+		bo:SetBackdrop({
+			edgeFile = "Interface\\BUTTONS\\WHITE8X8",
+			edgeSize = sz,
+			insets   = { left = 0, right = 0, top = 0, bottom = 0 },
+		})
+		bo:SetBackdropBorderColor(
+			cfg.borderColorR or 0,
+			cfg.borderColorG or 0,
+			cfg.borderColorB or 0,
+			cfg.borderColorA or 1)
+		bo:Show()
+	else
+		bo:SetAllPoints(icon)
+		bo:SetBackdrop(nil)
+	end
+end
+
+-- Apply font + size to the countdown text. Cheap to call on every
+-- render — FontString:SetFont is a no-op when the args don't change.
+local function ApplyIconText(icon, cfg)
+	if not icon.text then return end
+	icon.text:SetFont(STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF",
+		cfg.cdTextFontSize or 14, "OUTLINE")
 end
 
 local function CreateRow(unit)
@@ -163,17 +263,26 @@ local function AnchorRowToUnit(row, unit, cfg)
 	end
 end
 
-local function ApplyCooldownVisual(iconFrame, cdEntry)
+local function ApplyCooldownVisual(iconFrame, cdEntry, cfg)
+	-- Stash the cfg bits the per-icon OnUpdate needs so the tick doesn't
+	-- have to re-read SavedVariables on every fire.
+	iconFrame._cdShowMinutes = cfg.cdShowMinutes
 	if cdEntry and cdEntry.duration and cdEntry.duration > 0 then
 		local now = GetTime()
 		local remaining = cdEntry.readyAt - now
 		if remaining > 0 then
 			iconFrame.cooldown:SetCooldown(cdEntry.startTime, cdEntry.duration)
 			iconFrame.cooldown:SetDrawSwipe(true)
-			iconFrame.icon:SetDesaturated(true)
+			iconFrame.icon:SetDesaturated(cfg.cdGrayout ~= false)
+			iconFrame._cdExpiry = cdEntry.readyAt
+			if iconFrame.text then
+				iconFrame.text:SetText(FormatRemaining(remaining, cfg.cdShowMinutes))
+			end
 			return
 		end
 	end
+	iconFrame._cdExpiry = nil
+	if iconFrame.text then iconFrame.text:SetText("") end
 	-- Clear alone leaves the swipe overlay drawn; SetDrawSwipe(false) is
 	-- required to actually erase it (matches MiniCC's clear path).
 	iconFrame.cooldown:Clear()
@@ -224,7 +333,12 @@ local function RenderRow(unit)
 		local tex = (info and (info.originalIconID or info.iconID)) or UNKNOWN_ICON
 		icon.icon:SetTexture(tex)
 
-		ApplyCooldownVisual(icon, unitState[spellId])
+		-- BliZzi-style polish: outward border + outlined countdown text.
+		-- Both are cfg-driven so the user can disable border via size=0
+		-- or change font size live from Settings.
+		ApplyIconBorder(icon, cfg)
+		ApplyIconText(icon, cfg)
+		ApplyCooldownVisual(icon, unitState[spellId], cfg)
 		icon:Show()
 
 		x = x + cfg.iconSize + cfg.iconGap

@@ -68,7 +68,19 @@
         "CreateSettingsListSectionHeaderInitializer",
         "CreateSettingsButtonInitializer",
         "RunNextFrame",
-        "EditModeSystemMixin"
+        "EditModeSystemMixin",
+        "LOCALIZED_CLASS_NAMES_MALE",
+        "CreateObjectPool",
+        "STANDARD_TEXT_FONT",
+        "LE_PARTY_CATEGORY_HOME",
+        "SettingsSliderControlMixin",
+        "MacroFrame",
+        "UIParentLoadAddOn",
+        "AddonCompartmentFrame",
+        "CreateSettingsExpandableSectionInitializer",
+        "LE_PARTY_CATEGORY_INSTANCE",
+        "UISpecialFrames",
+        "ReloadUI"
     ],
     "Lua.type.weakUnionCheck": true
 }

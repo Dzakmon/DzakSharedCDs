@@ -11,11 +11,20 @@ local addonName, ns = ...
 -- Defaults for the global display block. Single source of truth: both
 -- the seeder below and Settings.lua's "Reset to defaults" path read it.
 ns.DEFAULT_DISPLAY = {
-	iconSize     = 24,
-	iconGap      = 2,
-	growDirection = "RIGHT", -- "LEFT" or "RIGHT"
-	offsetX      = 6,
-	offsetY      = 0,
+	iconSize       = 24,
+	iconGap        = 2,
+	growDirection  = "RIGHT", -- "LEFT" or "RIGHT"
+	offsetX        = 6,
+	offsetY        = 0,
+	-- BliZzi-style icon polish.
+	borderSize     = 1,       -- 0 disables the outward border
+	borderColorR   = 0,
+	borderColorG   = 0,
+	borderColorB   = 0,
+	borderColorA   = 1,
+	cdGrayout      = true,    -- desaturate icon while on cooldown
+	cdShowMinutes  = true,    -- "5m" instead of "300" when rem >= 60
+	cdTextFontSize = 14,
 }
 
 local function SeedSchema()

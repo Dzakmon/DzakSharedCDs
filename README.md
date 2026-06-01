@@ -4,7 +4,7 @@ A small WoW retail addon that lets a 5-man dungeon group **see each other's majo
 
 How it works in one line: each client broadcasts when it casts a tracked spell over a hidden addon-message channel; receivers render that as an icon with a cooldown swipe on the sender's party frame.
 
-Status: **v0.7.0** — UI refactor: Settings panel now built on **NoobTaco-Config**, anchor uses **FerrozEditModeLib** for native Edit Mode integration. Requires re-testing after the lib swap.
+Status: **v0.8.0** — BliZzi_Interrupts-inspired polish: multi-provider unit-frame resolver (ElvUI / Cell / Grid2 / SUF / Danders / EnhanceQoL / Mich's / Blizzard), outward-border icon style with outlined countdown text, versioned wire format `D1;VERB;arg1;...` with multi-channel send fallback (INSTANCE_CHAT → PARTY → WHISPER) for Timed M+ resilience.
 
 ---
 
@@ -53,16 +53,23 @@ ls dist/_verify
 
 ### The wire protocol
 
-All inter-client communication goes through one Blizzard `CHAT_MSG_ADDON` prefix: **`DSCD`**. The channel is invisible to chat windows. Four message verbs:
+All inter-client communication goes through one Blizzard `CHAT_MSG_ADDON` prefix: **`DSCD`**. The channel is invisible to chat windows. Four message verbs, all wrapped in a versioned header:
 
-| Wire format                      | Meaning                                                                                            |
-| -------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `INIT:<id1>,<id2>,...`           | "Here's the subset of tracked spells I actually have talented." Sent on ready check + other moments. |
-| `USED:<spellID>`                 | "I just cast spell `<spellID>`." Triggers a cooldown swipe on the receiver's display.              |
-| `READY:<spellID>`                | "My cooldown for `<spellID>` finished." Triggers the receiver to clear the swipe.                  |
-| `PING:<timestamp>`               | Transport-layer delivery test from `/dscd ping`. Receivers print a visible chat line.              |
+| Wire format                          | Meaning                                                                                            |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| `D1;INIT;<id1>,<id2>,...`            | "Here's the subset of tracked spells I actually have talented." Sent on ready check + other moments. |
+| `D1;USED;<spellID>`                  | "I just cast spell `<spellID>`." Triggers a cooldown swipe on the receiver's display.              |
+| `D1;READY;<spellID>`                 | "My cooldown for `<spellID>` finished." Triggers the receiver to clear the swipe.                  |
+| `D1;PING;<timestamp>`                | Transport-layer delivery test from `/dscd ping`. Receivers print a visible chat line.              |
 
-**Distribution**: PARTY for parties, RAID for raids — never INSTANCE_CHAT, even inside dungeons. This mirrors `LuraMemorySync` (a known-working production addon bundled alongside this one for reference); some wiki guidance says addon messages "should" use INSTANCE_CHAT in instances but real-world deployment doesn't.
+The `D1` header is a protocol version + sentinel; a future `D2` could be parsed alongside without breaking v1 clients. Multi-arg via semicolons is reserved for future verbs (sender metadata, scheduled-ready timestamps, etc.) without requiring a format change.
+
+The receiver also accepts the legacy `VERB:payload` format (pre-v0.8) so a mixed-version group during rollout stays functional in one direction.
+
+**Distribution strategy** (adopted from BliZzi_Interrupts's BIT.Net):
+1. `INSTANCE_CHAT` first when in an instance group (M+, LFG, scenarios) — survives cross-realm shards better than PARTY.
+2. `RAID` if in raid, else `PARTY` for normal home groups.
+3. Whisper-each-member fallback — rescues Timed M+ scenarios where Blizzard's `ret == 11` blocks the group channels. The block flag is exposed at `ns.AddonMessagesBlocked` for diagnostics.
 
 Throttling: Blizzard caps `SendAddonMessage` at 10-burst + 1/sec recovery per prefix. `Tracker.lua` additionally debounces INIT broadcasts (2.5s coalescing + 3s minimum interval) so a roster cascade or a flurry of talent updates can't spam the channel.
 
@@ -100,14 +107,29 @@ If a party member runs none of those addons, their spec is unknown and their row
 
 ### Display
 
-One icon row per group unit, attached to the unit's Blizzard frame. Supports:
+One icon row per group unit, attached to the unit's on-screen frame. The multi-provider resolver in [PartyFrames.lua](PartyFrames.lua) auto-detects (in priority order):
 
-- **Party frames** — `CompactPartyFrameMemberN`, `PartyFrame.MemberFrameN`
-- **Raid frames** — `CompactRaidFrameN` (also picked up when "Raid-style frames for parties" is enabled)
+- **ElvUI** (`ElvUF_PartyGroup1`, `ElvUF_Player`)
+- **D4 / DandersFrames** (`DandersPartyHeader`)
+- **Cell** (`CellPartyFrameHeader`, `CellSoloFramePlayer`)
+- **Grid2** (`Grid2LayoutHeader<N>UnitButton`, scans 1..8 sub-headers)
+- **EnhanceQoL** (`EQOLUFPartyHeader`)
+- **ShadowedUnitFrames** (`SUFHeaderparty`)
+- **Mich's RaidFrames** (`MRF_PartyHeader`, `MRF_RaidHeader1..8`)
+- **Blizzard** — `CompactPartyFrameMember`, `CompactRaidFrame`, `PartyFrame.MemberFrame`, `PlayerFrame`
 
-When no matching frame is visible (typical for ElvUI / Grid2 / Vuhdo / Cell users), rows fall back to a `LibEditMode`-managed anchor and stagger vertically. A 1s ticker re-resolves the frame so toggling layouts (solo → party → raid) doesn't strand rows on a hidden anchor target.
+Each provider's visibility is checked at resolve time (the addon may be loaded but currently hiding its party header — ElvUI's party + raid headers coexist), and the frame's bound unit is read via `:GetAttribute("unit")` first because the attribute survives child recycling on roster changes. Direct string comparison is used instead of `UnitIsUnit()` to side-step 12.0.5's tainted-bool issue on secret values.
 
-Icons: bright when ready, desaturated + clockwise swipe + countdown text when on cooldown. Spell tooltip on hover.
+When no provider matches, rows fall back to the FerrozEditModeLib-managed anchor and stagger vertically. A 1s ticker re-resolves the frame so toggling layouts (solo → party → raid) doesn't strand rows on a hidden anchor target.
+
+**Icon style** (BliZzi_Interrupts-inspired):
+
+- **Spell texture** with standard 0.08–0.92 texcoord crop.
+- **Cooldown swipe** via Blizzard `CooldownFrameTemplate`. Hidden countdown numbers; we draw our own.
+- **Outward border** (sibling Frame anchored slightly larger than the icon, so the backdrop edgeFile sits *outside* the icon area instead of eating into the texture). Size + color configurable via `borderSize` / `borderColor[RGBA]` — set `borderSize = 0` to disable.
+- **Outlined countdown text** in `STANDARD_TEXT_FONT` so the look is consistent regardless of whether the user has OmniCC. Format: integer seconds, or `"5m"` once remaining ≥ 60s and `cdShowMinutes` is on.
+- **Gray-out on cooldown** (toggle: `cdGrayout`, default ON) — `SetDesaturated(true)` while ticking, restored on `OnCooldownDone`.
+- **Tooltip on hover** via `GameTooltip:SetSpellByID`.
 
 **Sizing & positioning** live in **Edit Mode** — press Esc → Edit Mode and click the DzakSharedCDs anchor. The same 5 controls are exposed as a plugin panel via `FerrozEditModeLib`'s `GetOrCreateFrameSpecificControls` hook:
 
@@ -186,11 +208,19 @@ DzakSharedCDsDB = {
     debug = false,
     anchor = { point = "CENTER", x = 0, y = 0, enabled = true },
     display = {
-        iconSize      = 24,
-        iconGap       = 2,
-        growDirection = "RIGHT",
-        offsetX       = 6,
-        offsetY       = 0,
+        iconSize       = 24,
+        iconGap        = 2,
+        growDirection  = "RIGHT",
+        offsetX        = 6,
+        offsetY        = 0,
+        borderSize     = 1,       -- outward border thickness (0 disables)
+        borderColorR   = 0,
+        borderColorG   = 0,
+        borderColorB   = 0,
+        borderColorA   = 1,
+        cdGrayout      = true,    -- desaturate icon while on cooldown
+        cdShowMinutes  = true,    -- "5m" instead of "300" when rem >= 60
+        cdTextFontSize = 14,
     },
     anchor = {
         layouts = {
@@ -245,13 +275,15 @@ Migration:
 Internally wraps `LibSpecialization.RegisterGroup`.
 
 ### `Chat.lua`
-- `ns.Chat:Send(verb, payload)` — wraps `C_ChatInfo.SendAddonMessage`. Distribution is `RAID` in raids, `PARTY` otherwise. Never `INSTANCE_CHAT` (LuraMemorySync precedent).
-- `ns.Chat:SendPing()` — transport delivery test. Prints sender-side status and visible chat lines on every recipient.
-- `ns.Chat:SetReceiveHandler(fn)` — `fn(senderShortName, verb, payload)` fires on `CHAT_MSG_ADDON` with prefix `DSCD`. PING is handled internally and never reaches this handler.
-- Constant: `ns.Chat.PREFIX = "DSCD"`.
+- `ns.Chat:Send(verb, ...)` — wraps `C_ChatInfo.SendAddonMessage`. Args are joined into the versioned `D1;VERB;arg1;arg2` wire format. Transport tries `INSTANCE_CHAT` → group channel (`RAID`/`PARTY`) → WHISPER-each-member in order.
+- `ns.Chat:SendPing()` — transport delivery test. Prints sender-side status (with `[M+ block detected]` marker when `ret == 11`) and visible chat lines on every recipient.
+- `ns.Chat:SetReceiveHandler(fn)` — `fn(senderShortName, verb, payload)` fires on `CHAT_MSG_ADDON` with prefix `DSCD`. PING is handled internally and never reaches this handler. Both `D1;VERB;...` and legacy `VERB:payload` formats are accepted.
+- Constants: `ns.Chat.PREFIX = "DSCD"`, `ns.Chat.PROTOCOL_VERSION = "D1"`.
+- Diagnostic: `ns.AddonMessagesBlocked` — true after the most recent send returned `ret == 11` (Timed M+ block); cleared on the next successful send.
 
 ### `PartyFrames.lua`
-- `ns.PartyFrames:Resolve(unit)` → the Blizzard frame for `unit`, or nil if none is visible. Supports `CompactRaidFrameN` (preferred in raids), `CompactPartyFrameMemberN`, and `PartyFrame.MemberFrameN`. Falls back to a CompactRaid scan to catch the "Raid-style frames for parties" mode.
+- `ns.PartyFrames:Resolve(unit)` → the on-screen frame for `unit`, or nil if no provider matched. Provider precedence (first match wins): ElvUI → Danders → Cell → Grid2 → EnhanceQoL → SUF → Mich's → Blizzard. Adapted from BliZzi_Interrupts/Core/UnitFrames.lua.
+- `ns.PartyFrames:GetActiveProviders()` → list of detected provider names (for diagnostics / a possible future "which UI do you use?" prompt).
 
 ### `Tracker.lua`
 - `ns.Tracker:GetUnitState(unit)` → `{ [spellId] = { startTime, duration, readyAt } }`.
