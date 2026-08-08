@@ -4,8 +4,3 @@ dist/
 # Local Claude Code harness settings (per-user, not committed)
 .claude/settings.local.json
 
-# Reference addons we keep alongside the source for research only
-# (commented out: if you DO want to track these, leave the rest of
-# this file as-is and remove these lines)
-PetesDefensiveHistory
-BliZzi_Interrupts

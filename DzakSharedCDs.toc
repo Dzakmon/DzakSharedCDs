@@ -1,36 +1,10 @@
 ## Interface: 120005, 120007
 ## Title: DzakSharedCDs
-## Notes: Broadcasts your tracked spell cooldowns to addon-using party members and shows theirs back, via a hidden addon-message channel.
+## Notes: Broadcasts your tracked spell cooldowns to the party as a plain chat line and shows everyone's timers on screen. No dependencies; the sender doesn't need the addon.
 ## Author: Dzak
-## Version: 0.11.0
+## Version: 1.0.0
 ## SavedVariables: DzakSharedCDsDB
 ## IconTexture: Interface\Icons\Spell_Holy_BorrowedTime
 
-# ============ Embedded libraries ============
-# LibStub first — every other lib gates registration through it.
-Libs\LibStub\LibStub.lua
-
-# NoobTaco-Config: schema-driven settings UI. Its own LibStub redirects
-# to ours; Internal/* are the engine modules. Same load-order rule —
-# load its bundled LibStub first to match the lib's own TOC.
-Libs\NoobTaco-Config\Internal\LibStub.lua
-Libs\NoobTaco-Config\NoobTaco-Config.lua
-Libs\NoobTaco-Config\Themes\Theme.lua
-Libs\NoobTaco-Config\Internal\Schema.lua
-Libs\NoobTaco-Config\Internal\State.lua
-Libs\NoobTaco-Config\Internal\Layout.lua
-Libs\NoobTaco-Config\Internal\Renderer.lua
-
-Libs\LibSpecialization\LibStub\LibStub.lua
-Libs\LibSpecialization\LibSpecialization\LibSpecialization.lua
-
-# ============ Addon source ============
 Debug.lua
-ClassDefaults.lua
-SpecCache.lua
-Chat.lua
-PartyFrames.lua
-Tracker.lua
-Display.lua
-Main.lua
-Settings.lua
+DzakSharedCDs.lua

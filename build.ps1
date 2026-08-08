@@ -53,33 +53,8 @@ foreach ($name in $topLevelFiles) {
     }
 }
 
-$dirs = @('Libs')
-foreach ($name in $dirs) {
-    $src = Join-Path $root $name
-    if (Test-Path $src) {
-        Copy-Item -Path $src -Destination $pkgRoot -Recurse
-    }
-}
-
-# --- Strip documentation assets from bundled libs ----------------------------
-# NoobTaco-Config ships ~12 MB of PNG screenshots, fonts use ~750 KB, and the
-# nested LICENSE / CHANGELOG / README files add up. None are loaded at runtime,
-# so they're dead weight in the distributed zip. We exclude:
-#   - Screenshots/ folders (NoobTaco's CurseForge gallery)
-#   - *.md / *.txt / LICENSE / LICENSE.txt / License.txt
-#   - AI_USAGE.md
-# Fonts and Textures STAY because Theme.lua references them at runtime.
-$libsRoot = Join-Path $pkgRoot 'Libs'
-$junkDirs = @('Screenshots')
-foreach ($pattern in $junkDirs) {
-    Get-ChildItem -Path $libsRoot -Recurse -Directory -Filter $pattern -ErrorAction SilentlyContinue |
-        ForEach-Object { Remove-Item -Recurse -Force $_.FullName }
-}
-$junkFiles = @('*.md', 'LICENSE', 'LICENSE.txt', 'License.txt', 'AI_USAGE.md')
-foreach ($pattern in $junkFiles) {
-    Get-ChildItem -Path $libsRoot -Recurse -File -Filter $pattern -ErrorAction SilentlyContinue |
-        ForEach-Object { Remove-Item -Force $_.FullName }
-}
+# No Libs/ to copy — the addon is dependency-free by design. If that ever
+# changes, add the folder copy and lib-asset stripping back here.
 
 # --- Zip it ------------------------------------------------------------------
 # Compress-Archive with -Path pointing at a directory includes the
